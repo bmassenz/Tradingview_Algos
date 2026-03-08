@@ -1,0 +1,428 @@
+// This Pine Script(TM) v6 source code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+
+//@version=6
+indicator(
+     "MTF Confluence Alert Manager",
+     overlay       = true,
+     max_bars_back = 5000
+     )
+
+// ============================================================================
+// SECTION 1 -- INPUT PARAMETERS
+// ============================================================================
+
+// Trend layer
+i_emaFast       = input.int(50,    "EMA Fast Length",         minval=5,   maxval=200,  group="Trend")
+i_emaSlow       = input.int(200,   "EMA Slow Length",         minval=50,  maxval=500,  group="Trend")
+i_supertrendMul = input.float(3.0, "Supertrend Multiplier",   minval=1.0, maxval=6.0,  step=0.5, group="Trend")
+i_supertrendLen = input.int(10,    "Supertrend ATR Period",    minval=5,   maxval=50,   group="Trend")
+
+// Setup / entry layer
+i_rsiLen        = input.int(14,    "RSI / Stoch Length",      minval=5,   maxval=30,   group="Setup")
+i_rsiOB         = input.int(70,    "RSI Overbought",          minval=60,  maxval=90,   group="Setup")
+i_rsiOS         = input.int(30,    "RSI Oversold",            minval=10,  maxval=40,   group="Setup")
+i_macdFast      = input.int(12,    "MACD Fast Length",         minval=5,   maxval=30,   group="Setup")
+i_macdSlow      = input.int(26,    "MACD Slow Length",         minval=15,  maxval=50,   group="Setup")
+i_macdSig       = input.int(9,     "MACD Signal Length",       minval=3,   maxval=20,   group="Setup")
+i_adxLen        = input.int(14,    "ADX Length",               minval=7,   maxval=30,   group="Setup")
+i_adxThreshHigh = input.int(25,    "ADX Trend Threshold",     minval=15,  maxval=40,   group="Setup")
+i_adxThreshLow  = input.int(20,    "ADX Range Threshold",     minval=10,  maxval=30,   group="Setup")
+
+// Stochastic
+i_stochSmooth   = input.int(3,     "Stoch Smoothing K",       minval=1,   maxval=10,   group="Entry")
+i_stochDSmooth  = input.int(3,     "Stoch Smoothing D",       minval=1,   maxval=10,   group="Entry")
+i_stochOB       = input.int(70,    "Stoch Overbought",        minval=60,  maxval=90,   group="Entry")
+i_stochOS       = input.int(30,    "Stoch Oversold",          minval=10,  maxval=40,   group="Entry")
+
+// Volume
+i_volLen        = input.int(20,    "Volume SMA Length",        minval=5,   maxval=100,  group="Entry")
+
+// Risk / volatility
+i_atrLen        = input.int(14,    "ATR Length",               minval=5,   maxval=50,   group="Risk")
+i_atrSlMul      = input.float(2.0, "ATR Stop-Loss Multiple",  minval=0.5, maxval=5.0,  step=0.5, group="Risk")
+i_atrTpMul      = input.float(3.0, "ATR Take-Profit Multiple",minval=1.0, maxval=8.0,  step=0.5, group="Risk")
+i_highVolMul    = input.float(1.5, "High Volatility ATR Mult", minval=1.0, maxval=3.0, step=0.1, group="Risk")
+i_highVolAvgLen = input.int(50,    "High Vol ATR Average Len", minval=10,  maxval=200,  group="Risk")
+i_ddWarnPct     = input.float(5.0, "Drawdown Warning %",      minval=1.0, maxval=20.0, step=0.5, group="Risk")
+
+// Bollinger Bands (mean-reversion mode)
+i_bbLen         = input.int(20,    "BB Length",                minval=10,  maxval=50,   group="Mean Reversion")
+i_bbMult        = input.float(2.0, "BB StdDev Multiplier",    minval=1.0, maxval=4.0,  step=0.5, group="Mean Reversion")
+
+// Session filter
+i_sessStart     = input.int(30,    "Session buffer minutes",   minval=0,  maxval=120,  group="Session",
+                     tooltip="Avoid first/last N minutes of the session")
+i_sessStartHour = input.int(9,     "Session Start Hour",       minval=0,  maxval=23,   group="Session")
+i_sessStartMin  = input.int(30,    "Session Start Minute",     minval=0,  maxval=59,   group="Session")
+i_sessEndHour   = input.int(16,    "Session End Hour",         minval=0,  maxval=23,   group="Session")
+i_sessEndMin    = input.int(0,     "Session End Minute",       minval=0,  maxval=59,   group="Session")
+
+// Visual
+i_showLabels    = input.bool(true, "Show Info Labels",         group="Visual")
+i_showBG        = input.bool(true, "Show Session Background",  group="Visual")
+
+// ============================================================================
+// SECTION 2 -- HELPER FUNCTIONS
+// ============================================================================
+
+// Directional Movement / ADX calculation (Pine v6 compatible)
+adx(len) =>
+    up   = ta.change(high)
+    down = -ta.change(low)
+    plusDM  = na(up)   ? na : (up > down and up > 0   ? up   : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    trueRange = ta.rma(ta.tr, len)
+    plusDI  = 100 * ta.rma(plusDM, len)  / trueRange
+    minusDI = 100 * ta.rma(minusDM, len) / trueRange
+    dx = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+    adxVal = ta.rma(dx, len)
+    [adxVal, plusDI, minusDI]
+
+// Supertrend calculation
+supertrend(factor, atrLen) =>
+    src    = hl2
+    atrVal = ta.atr(atrLen)
+    upperBand = src + factor * atrVal
+    lowerBand = src - factor * atrVal
+    prevLower = nz(lowerBand[1])
+    prevUpper = nz(upperBand[1])
+    lowerBand := lowerBand > prevLower or close[1] < prevLower ? lowerBand : prevLower
+    upperBand := upperBand < prevUpper or close[1] > prevUpper ? upperBand : prevUpper
+    var int dir = 1
+    dir := dir == -1 and close > prevUpper ? 1 :
+           dir ==  1 and close < prevLower ? -1 : dir
+    stLine = dir == 1 ? lowerBand : upperBand
+    [stLine, dir]
+
+// ============================================================================
+// SECTION 3 -- DAILY TIMEFRAME INDICATORS (TREND LAYER)
+// ============================================================================
+
+// --- EMA 50 / 200 ---
+d_emaFast = request.security(syminfo.tickerid, "D", ta.ema(close, i_emaFast),
+             lookahead = barmerge.lookahead_off)
+d_emaSlow = request.security(syminfo.tickerid, "D", ta.ema(close, i_emaSlow),
+             lookahead = barmerge.lookahead_off)
+
+d_emaUptrend   = d_emaFast > d_emaSlow
+d_emaDowntrend = d_emaFast < d_emaSlow
+
+// --- Supertrend (Daily) ---
+[d_stLine_raw, d_stDir_raw] = request.security(syminfo.tickerid, "D",
+             supertrend(i_supertrendMul, i_supertrendLen),
+             lookahead = barmerge.lookahead_off)
+d_stBullish = d_stDir_raw == 1
+d_stBearish = d_stDir_raw == -1
+
+// Detect supertrend flips on the daily
+d_stFlipBear = d_stBullish[1] and d_stBearish
+d_stFlipBull = d_stBearish[1] and d_stBullish
+
+// --- ADX (Daily) ---
+[d_adxVal, d_plusDI, d_minusDI] = request.security(syminfo.tickerid, "D",
+             adx(i_adxLen),
+             lookahead = barmerge.lookahead_off)
+
+d_trending = d_adxVal > i_adxThreshHigh
+d_ranging  = d_adxVal < i_adxThreshLow
+
+// ============================================================================
+// SECTION 4 -- 4-HOUR TIMEFRAME INDICATORS (SETUP LAYER)
+// ============================================================================
+
+// --- RSI (4H) ---
+h4_rsi = request.security(syminfo.tickerid, "240", ta.rsi(close, i_rsiLen),
+             lookahead = barmerge.lookahead_off)
+
+h4_rsiCrossAbove30 = ta.crossover(h4_rsi, float(i_rsiOS))
+h4_rsiCrossBelow70 = ta.crossunder(h4_rsi, float(i_rsiOB))
+h4_rsiOverbought   = h4_rsi > i_rsiOB
+h4_rsiOversold     = h4_rsi < i_rsiOS
+
+// --- MACD (4H) ---
+[h4_macdLine, h4_signal, h4_hist] = request.security(syminfo.tickerid, "240",
+             ta.macd(close, i_macdFast, i_macdSlow, i_macdSig),
+             lookahead = barmerge.lookahead_off)
+
+h4_macdBullCross = ta.crossover(h4_macdLine, h4_signal)
+h4_macdBearCross = ta.crossunder(h4_macdLine, h4_signal)
+
+// ============================================================================
+// SECTION 5 -- CHART TIMEFRAME INDICATORS (ENTRY LAYER)
+// ============================================================================
+
+// --- Stochastic ---
+stochK = ta.sma(ta.stoch(close, high, low, i_rsiLen), i_stochSmooth)
+stochD = ta.sma(stochK, i_stochDSmooth)
+
+stochBullCross = ta.crossover(stochK, stochD) and stochK < i_stochOS
+stochBearCross = ta.crossunder(stochK, stochD) and stochK > i_stochOB
+
+// --- Volume confirmation ---
+volSma     = ta.sma(volume, i_volLen)
+volConfirm = volume > volSma
+
+// --- ATR for stops and volatility ---
+atrVal    = ta.atr(i_atrLen)
+atrAvg50  = ta.sma(atrVal, i_highVolAvgLen)
+highVol   = atrVal > i_highVolMul * atrAvg50
+
+// --- Bollinger Bands (used in ranging/mean-reversion mode) ---
+bbBasis  = ta.sma(close, i_bbLen)
+bbDev    = i_bbMult * ta.stdev(close, i_bbLen)
+bbUpper  = bbBasis + bbDev
+bbLower  = bbBasis - bbDev
+
+// ============================================================================
+// SECTION 6 -- SESSION FILTER
+// ============================================================================
+
+// Session check using time-of-day within the exchange session
+rawStartTotal = i_sessStartHour * 60 + i_sessStartMin + i_sessStart
+rawEndTotal   = i_sessEndHour * 60 + i_sessEndMin - i_sessStart
+
+currentHour  = hour(time, syminfo.timezone)
+currentMin   = minute(time, syminfo.timezone)
+currentTotal = currentHour * 60 + currentMin
+
+inSessionWindow = rawEndTotal >= rawStartTotal ?
+     (currentTotal >= rawStartTotal and currentTotal <= rawEndTotal) :
+     (currentTotal >= rawStartTotal or currentTotal <= rawEndTotal)
+
+sessionOk = barstate.isconfirmed and session.ismarket and inSessionWindow
+
+// ============================================================================
+// SECTION 7 -- REGIME DETECTION
+// ============================================================================
+
+regime_trend   = d_trending
+regime_range   = d_ranging
+regime_neutral = not regime_trend and not regime_range
+
+regimeStr = regime_trend ? "TREND" : regime_range ? "RANGE" : "NEUTRAL"
+
+// ============================================================================
+// SECTION 8 -- DRAWDOWN PROXY (PRICE-BASED)
+// ============================================================================
+
+// Since this is an indicator (not strategy), strategy.equity is unavailable.
+// Use a rolling price-based drawdown proxy over the last N bars as substitute.
+i_ddLookback = input.int(100, "Drawdown Lookback Bars", minval=10, maxval=500, group="Risk")
+
+highestClose    = ta.highest(close, i_ddLookback)
+priceDrawdownPct = highestClose > 0 ? (highestClose - close) / highestClose * 100 : 0.0
+ddWarning       = priceDrawdownPct >= i_ddWarnPct
+
+// ============================================================================
+// SECTION 9 -- ENTRY & EXIT CONDITIONS
+// ============================================================================
+
+// --- LONG CONDITIONS ---
+// Trend-following mode (ADX > threshold)
+trendLongSetup = h4_rsiCrossAbove30 or h4_macdBullCross
+trendLongOk    = d_emaUptrend and d_stBullish and regime_trend and trendLongSetup
+
+// Mean-reversion mode (ADX < threshold) -- price near lower BB
+revLongOk      = regime_range and d_emaUptrend and close <= bbLower * 1.005
+                 and (h4_rsiCrossAbove30 or h4_rsi < 35)
+
+longEntry = (trendLongOk or revLongOk)
+             and stochBullCross
+             and volConfirm
+             and sessionOk
+
+// --- SHORT CONDITIONS ---
+trendShortSetup = h4_rsiCrossBelow70 or h4_macdBearCross
+trendShortOk    = d_emaDowntrend and d_stBearish and regime_trend and trendShortSetup
+
+revShortOk      = regime_range and d_emaDowntrend and close >= bbUpper * 0.995
+                  and (h4_rsiCrossBelow70 or h4_rsi > 65)
+
+shortEntry = (trendShortOk or revShortOk)
+              and stochBearCross
+              and volConfirm
+              and sessionOk
+
+// --- EXIT CONDITIONS ---
+longExitCond  = d_stFlipBear or h4_rsiOverbought
+shortExitCond = d_stFlipBull or h4_rsiOversold
+
+// --- REGIME CHANGE CONDITIONS ---
+adxCrossAbove25 = ta.crossover(d_adxVal, float(i_adxThreshHigh))
+adxCrossBelow20 = ta.crossunder(d_adxVal, float(i_adxThreshLow))
+
+// ============================================================================
+// SECTION 10 -- ALERT CONDITIONS
+// ============================================================================
+
+// Stop / TP levels for alert messages
+longSL  = close - i_atrSlMul * atrVal
+longTP  = close + i_atrTpMul * atrVal
+shortSL = close + i_atrSlMul * atrVal
+shortTP = close - i_atrTpMul * atrVal
+
+// 1. MTF Long Entry
+alertcondition(longEntry, title = "MTF Long Entry",
+     message = "MTF LONG ENTRY | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | Regime: " + regimeStr +
+     " | RSI(4H): " + str.tostring(h4_rsi, "#.#") +
+     " | MACD(4H): " + str.tostring(h4_macdLine, "#.####") +
+     " | StochK: " + str.tostring(stochK, "#.#") +
+     " | ADX: " + str.tostring(d_adxVal, "#.#") +
+     " | SL: " + str.tostring(longSL, "#.####") +
+     " | TP: " + str.tostring(longTP, "#.####"))
+
+// 2. MTF Short Entry
+alertcondition(shortEntry, title = "MTF Short Entry",
+     message = "MTF SHORT ENTRY | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | Regime: " + regimeStr +
+     " | RSI(4H): " + str.tostring(h4_rsi, "#.#") +
+     " | MACD(4H): " + str.tostring(h4_macdLine, "#.####") +
+     " | StochK: " + str.tostring(stochK, "#.#") +
+     " | ADX: " + str.tostring(d_adxVal, "#.#") +
+     " | SL: " + str.tostring(shortSL, "#.####") +
+     " | TP: " + str.tostring(shortTP, "#.####"))
+
+// 3. Long Exit Signal
+alertcondition(longExitCond, title = "Long Exit Signal",
+     message = "LONG EXIT SIGNAL | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | Reason: " + (d_stFlipBear ? "Supertrend flipped bearish" : "RSI overbought (" + str.tostring(h4_rsi, "#.#") + ")") +
+     " | ADX: " + str.tostring(d_adxVal, "#.#"))
+
+// 4. Short Exit Signal
+alertcondition(shortExitCond, title = "Short Exit Signal",
+     message = "SHORT EXIT SIGNAL | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | Reason: " + (d_stFlipBull ? "Supertrend flipped bullish" : "RSI oversold (" + str.tostring(h4_rsi, "#.#") + ")") +
+     " | ADX: " + str.tostring(d_adxVal, "#.#"))
+
+// 5. Regime Change to Trending
+alertcondition(adxCrossAbove25, title = "Regime Change to Trending",
+     message = "REGIME -> TRENDING | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | ADX crossed above " + str.tostring(i_adxThreshHigh) +
+     " (ADX: " + str.tostring(d_adxVal, "#.#") + ")" +
+     " | EMA trend: " + (d_emaUptrend ? "Bullish" : d_emaDowntrend ? "Bearish" : "Flat") +
+     " | Supertrend: " + (d_stBullish ? "Bullish" : "Bearish"))
+
+// 6. Regime Change to Ranging
+alertcondition(adxCrossBelow20, title = "Regime Change to Ranging",
+     message = "REGIME -> RANGING | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | ADX crossed below " + str.tostring(i_adxThreshLow) +
+     " (ADX: " + str.tostring(d_adxVal, "#.#") + ")" +
+     " | BB Upper: " + str.tostring(bbUpper, "#.####") +
+     " | BB Lower: " + str.tostring(bbLower, "#.####"))
+
+// 7. High Volatility Alert
+alertcondition(highVol, title = "High Volatility Alert",
+     message = "HIGH VOLATILITY | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | ATR: " + str.tostring(atrVal, "#.####") +
+     " | ATR Avg(" + str.tostring(i_highVolAvgLen) + "): " + str.tostring(atrAvg50, "#.####") +
+     " | Ratio: " + str.tostring(atrAvg50 > 0 ? atrVal / atrAvg50 : 0.0, "#.##") + "x" +
+     " | Threshold: " + str.tostring(i_highVolMul, "#.#") + "x")
+
+// 8. Drawdown Warning
+alertcondition(ddWarning, title = "Drawdown Warning",
+     message = "DRAWDOWN WARNING | " + syminfo.ticker +
+     " @ " + str.tostring(close, "#.####") +
+     " | Price DD: " + str.tostring(priceDrawdownPct, "#.##") + "%" +
+     " | Peak(" + str.tostring(i_ddLookback) + " bars): " + str.tostring(highestClose, "#.####") +
+     " | Threshold: " + str.tostring(i_ddWarnPct, "#.#") + "%")
+
+// ============================================================================
+// SECTION 11 -- VISUAL MARKERS
+// ============================================================================
+
+// Entry signal shapes on chart
+plotshape(longEntry,  "Long Entry Signal",  shape.triangleup,
+     location.belowbar, color.new(color.green, 0), size = size.normal,
+     text = "LONG", textcolor = color.new(color.green, 0))
+
+plotshape(shortEntry, "Short Entry Signal", shape.triangledown,
+     location.abovebar, color.new(color.red, 0), size = size.normal,
+     text = "SHORT", textcolor = color.new(color.red, 0))
+
+// Exit signal markers
+plotshape(longExitCond,  "Long Exit Marker",  shape.xcross,
+     location.abovebar, color.new(color.orange, 0), size = size.small,
+     text = "Exit L", textcolor = color.new(color.orange, 0))
+
+plotshape(shortExitCond, "Short Exit Marker", shape.xcross,
+     location.belowbar, color.new(color.orange, 0), size = size.small,
+     text = "Exit S", textcolor = color.new(color.orange, 0))
+
+// ============================================================================
+// SECTION 12 -- BACKGROUND COLOR (SESSION + REGIME)
+// ============================================================================
+
+sessionBgColor = not i_showBG ? na :
+     sessionOk and regime_trend ? color.new(color.green, 92) :
+     sessionOk and regime_range ? color.new(color.orange, 92) :
+     sessionOk ? color.new(color.blue, 95) :
+     na
+
+bgcolor(sessionBgColor, title = "Session Active Background")
+
+// High volatility background flash
+bgcolor(highVol ? color.new(color.red, 90) : na, title = "High Volatility BG")
+
+// ============================================================================
+// SECTION 13 -- OVERLAY PLOTS
+// ============================================================================
+
+// EMA ribbons (daily, projected onto chart)
+plot(d_emaFast, "Daily EMA Fast", color.new(color.teal, 30), 2)
+plot(d_emaSlow, "Daily EMA Slow", color.new(color.orange, 30), 2)
+
+// Supertrend line
+stColor = d_stBullish ? color.new(color.green, 20) : color.new(color.red, 20)
+plot(d_stLine_raw, "Daily Supertrend", stColor, 2, plot.style_stepline_diamond)
+
+// Bollinger Bands (shown only in range mode)
+bbColor = regime_range ? color.new(color.purple, 60) : na
+plot(regime_range ? bbUpper : na, "BB Upper", bbColor, 1)
+plot(regime_range ? bbLower : na, "BB Lower", bbColor, 1)
+
+// ============================================================================
+// SECTION 14 -- INFO LABELS ON LAST BAR
+// ============================================================================
+
+if barstate.islast and i_showLabels
+    // Determine current signal status
+    sigStatus = longEntry  ? "LONG ENTRY" :
+                shortEntry ? "SHORT ENTRY" :
+                longExitCond  ? "EXIT LONG" :
+                shortExitCond ? "EXIT SHORT" :
+                "NO SIGNAL"
+
+    sigColor = longEntry  ? color.green :
+               shortEntry ? color.red :
+               longExitCond or shortExitCond ? color.orange :
+               color.gray
+
+    // Build multi-line info string
+    infoText = "--- MTF Alert Status ---" +
+         "\nSignal: " + sigStatus +
+         "\nRegime: " + regimeStr + " (ADX: " + str.tostring(d_adxVal, "#.#") + ")" +
+         "\nDaily EMA: " + (d_emaUptrend ? "Bullish" : d_emaDowntrend ? "Bearish" : "Flat") +
+         "\nSupertrend: " + (d_stBullish ? "Bullish" : "Bearish") +
+         "\nRSI(4H): " + str.tostring(h4_rsi, "#.#") +
+         "\nMACD(4H): " + str.tostring(h4_macdLine, "#.####") + " / " + str.tostring(h4_signal, "#.####") +
+         "\nStoch K/D: " + str.tostring(stochK, "#.#") + " / " + str.tostring(stochD, "#.#") +
+         "\nATR: " + str.tostring(atrVal, "#.####") + (highVol ? " [HIGH VOL]" : "") +
+         "\nVolume: " + (volConfirm ? "Above Avg" : "Below Avg") +
+         "\nPrice DD: " + str.tostring(priceDrawdownPct, "#.##") + "%" + (ddWarning ? " [WARNING]" : "") +
+         "\nSession: " + (sessionOk ? "Active" : "Inactive")
+
+    label.new(bar_index, high + atrVal * 0.5, infoText,
+         style     = label.style_label_lower_left,
+         color     = color.new(color.black, 20),
+         textcolor = sigColor,
+         textalign = text.align_left,
+         size      = size.small)

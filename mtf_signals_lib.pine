@@ -1,0 +1,193 @@
+// This Pine Script™ v6 library provides reusable multi-timeframe signal functions
+// for trend detection, momentum analysis, volatility measurement, volume confirmation,
+// regime classification, position sizing, and session filtering.
+
+//@version=6
+library("MTFSignalsLib", overlay = true)
+
+// ---------------------------------------------------------------------------
+// 1. getTrend – EMA crossover + Supertrend from any timeframe
+// ---------------------------------------------------------------------------
+// @function  Retrieves trend signals from a specified timeframe using dual-EMA
+//            crossover and Supertrend direction.
+// @param tf        Timeframe string (e.g. "60", "D").
+// @param emaFast   Length of the fast EMA.
+// @param emaSlow   Length of the slow EMA.
+// @param stMult    Supertrend ATR multiplier.
+// @param stPeriod  Supertrend ATR period.
+// @returns         [isBullish, isBearish, emaFastVal, emaSlowVal, supertrend]
+export getTrend(simple string tf, simple int emaFast, simple int emaSlow, simple float stMult, simple int stPeriod) =>
+    emaF = ta.ema(close, emaFast)
+    emaS = ta.ema(close, emaSlow)
+    [st, stDir] = ta.supertrend(stMult, stPeriod)
+
+    htfEmaF    = request.security(syminfo.tickerid, tf, emaF,    barmerge.gaps_off, barmerge.lookahead_off)
+    htfEmaS    = request.security(syminfo.tickerid, tf, emaS,    barmerge.gaps_off, barmerge.lookahead_off)
+    htfSt      = request.security(syminfo.tickerid, tf, st,      barmerge.gaps_off, barmerge.lookahead_off)
+    htfStDir   = request.security(syminfo.tickerid, tf, stDir,   barmerge.gaps_off, barmerge.lookahead_off)
+
+    bullish = htfEmaF > htfEmaS and htfStDir < 0
+    bearish = htfEmaF < htfEmaS and htfStDir > 0
+
+    [bullish, bearish, htfEmaF, htfEmaS, htfSt]
+
+// ---------------------------------------------------------------------------
+// 2. getMomentum – RSI + MACD crossover signals from any timeframe
+// ---------------------------------------------------------------------------
+// @function  Retrieves momentum signals using RSI overbought/oversold crossovers
+//            and MACD line/signal crossovers from a specified timeframe.
+// @param tf        Timeframe string.
+// @param rsiLen    RSI length.
+// @param rsiOB     RSI overbought threshold.
+// @param rsiOS     RSI oversold threshold.
+// @param macdFast  MACD fast length.
+// @param macdSlow  MACD slow length.
+// @param macdSig   MACD signal smoothing length.
+// @returns         [rsiBuy, rsiSell, macdBuy, macdSell, rsiVal, macdLine, macdSignal]
+export getMomentum(simple string tf, simple int rsiLen, simple int rsiOB, simple int rsiOS, simple int macdFast, simple int macdSlow, simple int macdSig) =>
+    rsi = ta.rsi(close, rsiLen)
+    [macdL, macdS, _macdH] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+    rsiBuyRaw  = ta.crossover(rsi, rsiOS)
+    rsiSellRaw = ta.crossunder(rsi, rsiOB)
+    macdBuyRaw  = ta.crossover(macdL, macdS)
+    macdSellRaw = ta.crossunder(macdL, macdS)
+
+    htfRsi      = request.security(syminfo.tickerid, tf, rsi,         barmerge.gaps_off, barmerge.lookahead_off)
+    htfMacdL    = request.security(syminfo.tickerid, tf, macdL,       barmerge.gaps_off, barmerge.lookahead_off)
+    htfMacdS    = request.security(syminfo.tickerid, tf, macdS,       barmerge.gaps_off, barmerge.lookahead_off)
+    htfRsiBuy   = request.security(syminfo.tickerid, tf, rsiBuyRaw,   barmerge.gaps_off, barmerge.lookahead_off)
+    htfRsiSell  = request.security(syminfo.tickerid, tf, rsiSellRaw,  barmerge.gaps_off, barmerge.lookahead_off)
+    htfMacdBuy  = request.security(syminfo.tickerid, tf, macdBuyRaw,  barmerge.gaps_off, barmerge.lookahead_off)
+    htfMacdSell = request.security(syminfo.tickerid, tf, macdSellRaw, barmerge.gaps_off, barmerge.lookahead_off)
+
+    [htfRsiBuy > 0, htfRsiSell > 0, htfMacdBuy > 0, htfMacdSell > 0, htfRsi, htfMacdL, htfMacdS]
+
+// ---------------------------------------------------------------------------
+// 3. getVolatility – ATR + Bollinger Bands + high-volatility flag
+// ---------------------------------------------------------------------------
+// @function  Computes ATR for position sizing, Bollinger Bands for regime
+//            detection, and a high-volatility flag (ATR > 1.5 * SMA(ATR, 50)).
+// @param atrLen  ATR / Bollinger Band length.
+// @returns       [atrVal, bbUpper, bbLower, bbMid, isHighVol]
+export getVolatility(simple int atrLen) =>
+    atrVal  = ta.atr(atrLen)
+    bbBasis = ta.sma(close, atrLen)
+    bbDev   = 2.0 * ta.stdev(close, atrLen)
+    bbUp    = bbBasis + bbDev
+    bbLo    = bbBasis - bbDev
+
+    atrSma   = ta.sma(atrVal, 50)
+    highVol  = atrVal > 1.5 * atrSma
+
+    [atrVal, bbUp, bbLo, bbBasis, highVol]
+
+// ---------------------------------------------------------------------------
+// 4. getVolume – volume vs average comparison
+// ---------------------------------------------------------------------------
+// @function  Compares current volume to its simple moving average and returns
+//            whether volume is above average and the volume ratio.
+// @param volLen  Length for the volume SMA.
+// @returns       [isAboveAvg, volRatio]
+export getVolume(simple int volLen) =>
+    volSma     = ta.sma(volume, volLen)
+    ratio      = volSma != 0 ? volume / volSma : 0.0
+    aboveAvg   = volume > volSma
+
+    [aboveAvg, ratio]
+
+// ---------------------------------------------------------------------------
+// 5. getRegime – ADX-based trending / ranging detection
+// ---------------------------------------------------------------------------
+// @function  Classifies the market regime as trending or ranging using ADX
+//            from a specified timeframe.
+// @param tf        Timeframe string.
+// @param adxLen    ADX / DI length.
+// @param adxTrend  ADX threshold above which the market is trending.
+// @param adxRange  ADX threshold below which the market is ranging.
+// @returns         [isTrending, isRanging, adxVal]
+export getRegime(simple string tf, simple int adxLen, simple int adxTrend, simple int adxRange) =>
+    upMove   = ta.change(high)
+    downMove = -ta.change(low)
+    plusDM   = na(upMove) ? na : (upMove > downMove and upMove > 0 ? upMove : 0.0)
+    minusDM  = na(downMove) ? na : (downMove > upMove and downMove > 0 ? downMove : 0.0)
+    trueRange = ta.rma(ta.tr, adxLen)
+    plusDI   = 100.0 * ta.rma(plusDM, adxLen) / trueRange
+    minusDI  = 100.0 * ta.rma(minusDM, adxLen) / trueRange
+    dx       = 100.0 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+    adx      = ta.rma(dx, adxLen)
+
+    htfAdx = request.security(syminfo.tickerid, tf, adx, barmerge.gaps_off, barmerge.lookahead_off)
+
+    trending = htfAdx >= adxTrend
+    ranging  = htfAdx <= adxRange
+
+    [trending, ranging, htfAdx]
+
+// ---------------------------------------------------------------------------
+// 6. calcPositionSize – Kelly-criterion inspired sizing
+// ---------------------------------------------------------------------------
+// @function  Calculates the number of units to trade based on equity, risk
+//            percentage, entry price, and stop-loss price.
+// @param equity     Account equity.
+// @param riskPct    Risk as a fraction of equity (e.g. 0.02 for 2%).
+// @param entryPrice Planned entry price.
+// @param stopPrice  Planned stop-loss price.
+// @returns          Quantity (number of units) to trade.
+export calcPositionSize(float equity, float riskPct, float entryPrice, float stopPrice) =>
+    riskAmount  = equity * riskPct
+    priceDiff   = math.abs(entryPrice - stopPrice)
+    qty         = priceDiff != 0 ? riskAmount / priceDiff : 0.0
+    math.max(qty, 0.0)
+
+// ---------------------------------------------------------------------------
+// 7. calcStopTakeProfit – dynamic SL / TP / trailing stop via ATR multiples
+// ---------------------------------------------------------------------------
+// @function  Computes stop-loss, take-profit, and trailing-stop levels using
+//            ATR-based multiples relative to the entry price.
+// @param entry   Entry price.
+// @param atr     Current ATR value.
+// @param slMult  Multiplier for the stop-loss distance.
+// @param tpMult  Multiplier for the take-profit distance.
+// @param isLong  True for long positions, false for short positions.
+// @returns       [stopLoss, takeProfit, trailStop]
+export calcStopTakeProfit(float entry, float atr, float slMult, float tpMult, bool isLong) =>
+    slDist = atr * slMult
+    tpDist = atr * tpMult
+    trDist = atr * slMult  // trailing stop mirrors stop-loss distance
+
+    stopLoss   = isLong ? entry - slDist : entry + slDist
+    takeProfit = isLong ? entry + tpDist : entry - tpDist
+    trailStop  = isLong ? close - trDist : close + trDist
+
+    [stopLoss, takeProfit, trailStop]
+
+// ---------------------------------------------------------------------------
+// 8. isSessionActive – session time filter
+// ---------------------------------------------------------------------------
+// @function  Returns true when the current bar falls within the specified
+//            session window, excluding the first and last 30 minutes.
+// @param startHour  Session start hour (0-23).
+// @param startMin   Session start minute (0-59).
+// @param endHour    Session end hour (0-23).
+// @param endMin     Session end minute (0-59).
+// @returns          True if the current bar is inside the active session.
+export isSessionActive(simple int startHour, simple int startMin, simple int endHour, simple int endMin) =>
+    // Shift window inward by 30 minutes to filter low-liquidity open/close
+    rawStartTotal = startHour * 60 + startMin + 30
+    rawEndTotal   = endHour * 60 + endMin - 30
+
+    adjStartHour = rawStartTotal / 60
+    adjStartMin  = rawStartTotal % 60
+    adjEndHour   = rawEndTotal / 60
+    adjEndMin    = rawEndTotal % 60
+
+    currentHour = hour(time, syminfo.timezone)
+    currentMin  = minute(time, syminfo.timezone)
+    currentTotal = currentHour * 60 + currentMin
+    startTotal   = adjStartHour * 60 + adjStartMin
+    endTotal     = adjEndHour * 60 + adjEndMin
+
+    inSession = endTotal >= startTotal ? (currentTotal >= startTotal and currentTotal <= endTotal) : (currentTotal >= startTotal or currentTotal <= endTotal)
+
+    inSession

@@ -1,0 +1,209 @@
+// This Pine Script™ v6 indicator displays a live trading dashboard overlay
+// with multi-timeframe confluence data, regime detection, position sizing,
+// and visual trade signals on the chart.
+
+//@version=6
+indicator("MTF Confluence Dashboard v1.0", overlay = true, max_labels_count = 500)
+
+// ---------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------
+
+// EMA Settings
+i_emaFastLen     = input.int(50,    "EMA Fast Length",          minval = 1, group = "Trend")
+i_emaSlowLen     = input.int(200,   "EMA Slow Length",          minval = 1, group = "Trend")
+
+// ADX / Regime Settings
+i_adxLen         = input.int(14,    "ADX Length",               minval = 1,  group = "Regime")
+i_adxThreshold   = input.float(25.0,"ADX Trending Threshold",  minval = 1.0,group = "Regime")
+
+// RSI Settings
+i_rsiLen         = input.int(14,    "RSI Length",               minval = 1,  group = "Momentum")
+
+// ATR / Stop Settings
+i_atrLen         = input.int(14,    "ATR Length",               minval = 1,  group = "Volatility")
+i_atrMult        = input.float(2.0, "ATR Stop Multiplier",     minval = 0.1,group = "Volatility")
+
+// Supertrend Settings
+i_stFactor       = input.float(3.0, "Supertrend Factor",       minval = 0.1,group = "Supertrend")
+i_stPeriod       = input.int(10,    "Supertrend ATR Period",    minval = 1,  group = "Supertrend")
+
+// Position Sizing
+i_accountSize    = input.float(100000.0, "Account Size ($)",    minval = 1.0,group = "Risk")
+i_riskPct        = input.float(1.0,      "Risk Per Trade (%)",  minval = 0.1, step = 0.1, group = "Risk")
+
+// Session Filter
+i_sessFilter     = input.session("0930-1600", "Active Session", group = "Session")
+i_sessTimezone   = input.string("America/New_York", "Session Timezone", group = "Session")
+
+// Multi-Timeframe
+i_dailyTF        = input.timeframe("D",  "Daily Timeframe",  group = "Timeframes")
+i_4hTF           = input.timeframe("240","4H Timeframe",     group = "Timeframes")
+
+// Dashboard Visibility
+i_showDashboard  = input.bool(true,  "Show Dashboard",     group = "Display")
+i_showSignals    = input.bool(true,  "Show Buy/Sell Marks", group = "Display")
+i_showEMAs       = input.bool(true,  "Show EMA Lines",     group = "Display")
+i_showSupertrend = input.bool(true,  "Show Supertrend",    group = "Display")
+
+// ---------------------------------------------------------------------------
+// Current-Timeframe Indicators
+// ---------------------------------------------------------------------------
+
+// EMAs on current timeframe
+emaFast = ta.ema(close, i_emaFastLen)
+emaSlow = ta.ema(close, i_emaSlowLen)
+
+// RSI on current timeframe
+rsiVal = ta.rsi(close, i_rsiLen)
+
+// ATR on current timeframe
+atrVal = ta.atr(i_atrLen)
+atrStop = atrVal * i_atrMult
+
+// ADX on current timeframe (manually calculated via DMI)
+// PineScript v6: ta.dmi returns [diplus, diminus, adx]
+[diPlus, diMinus, adxVal] = ta.dmi(i_adxLen, i_adxLen)
+
+// Supertrend on current timeframe
+[stValue, stDirection] = ta.supertrend(i_stFactor, i_stPeriod)
+
+// ---------------------------------------------------------------------------
+// Daily Timeframe Data (EMA 50/200 for trend)
+// ---------------------------------------------------------------------------
+
+dailyEmaFast    = request.security(syminfo.tickerid, i_dailyTF, ta.ema(close, i_emaFastLen), barmerge.gaps_off, barmerge.lookahead_off)
+dailyEmaSlow    = request.security(syminfo.tickerid, i_dailyTF, ta.ema(close, i_emaSlowLen), barmerge.gaps_off, barmerge.lookahead_off)
+dailyBullish    = dailyEmaFast > dailyEmaSlow
+dailyBearish    = dailyEmaFast < dailyEmaSlow
+
+// ---------------------------------------------------------------------------
+// 4H Timeframe Data (RSI for momentum)
+// ---------------------------------------------------------------------------
+
+fourH_RSI = request.security(syminfo.tickerid, i_4hTF, ta.rsi(close, i_rsiLen), barmerge.gaps_off, barmerge.lookahead_off)
+
+// ---------------------------------------------------------------------------
+// Regime Detection
+// ---------------------------------------------------------------------------
+
+isTrending = adxVal >= i_adxThreshold
+regimeText  = isTrending ? "TRENDING" : "RANGING"
+regimeColor = isTrending ? color.green : color.yellow
+
+// ---------------------------------------------------------------------------
+// Daily Trend
+// ---------------------------------------------------------------------------
+
+dailyTrendText  = dailyBullish ? "BULLISH" : dailyBearish ? "BEARISH" : "NEUTRAL"
+dailyTrendColor = dailyBullish ? color.green : dailyBearish ? color.red : color.gray
+
+// ---------------------------------------------------------------------------
+// 4H Momentum Color Coding
+// RSI 30-50 in uptrend  = green (pullback buy zone)
+// RSI 50-70 in downtrend = red  (pullback sell zone)
+// Otherwise gray
+// ---------------------------------------------------------------------------
+
+fourH_MomColor = dailyBullish and fourH_RSI >= 30 and fourH_RSI <= 50 ? color.green :
+                 dailyBearish and fourH_RSI >= 50 and fourH_RSI <= 70 ? color.red   :
+                 color.gray
+
+// ---------------------------------------------------------------------------
+// Signal Logic: confluence of regime, daily trend, supertrend, and momentum
+// ---------------------------------------------------------------------------
+
+longCondition  = isTrending and dailyBullish and stDirection < 0 and fourH_RSI >= 30 and fourH_RSI <= 50
+shortCondition = isTrending and dailyBearish and stDirection > 0 and fourH_RSI >= 50 and fourH_RSI <= 70
+
+// Detect new signals (first bar where condition flips on)
+longSignal  = longCondition  and not longCondition[1]
+shortSignal = shortCondition and not shortCondition[1]
+
+// Track current signal state
+var string currentSignal = "FLAT"
+if longSignal
+    currentSignal := "LONG"
+if shortSignal
+    currentSignal := "SHORT"
+if not longCondition and not shortCondition
+    currentSignal := "FLAT"
+
+signalColor = currentSignal == "LONG" ? color.green : currentSignal == "SHORT" ? color.red : color.gray
+
+// ---------------------------------------------------------------------------
+// Position Size Calculation (risk-based)
+// Risk$ = Account * RiskPct / 100
+// Position Size = Risk$ / (ATR * Multiplier)
+// ---------------------------------------------------------------------------
+
+riskDollars  = i_accountSize * (i_riskPct / 100.0)
+positionSize = atrStop > 0 ? riskDollars / atrStop : 0.0
+
+// ---------------------------------------------------------------------------
+// Session Filter
+// ---------------------------------------------------------------------------
+
+inSession     = not na(time(timeframe.period, i_sessFilter, i_sessTimezone))
+sessionText   = inSession ? "ACTIVE"   : "INACTIVE"
+sessionColor  = inSession ? color.green : color.gray
+
+// ---------------------------------------------------------------------------
+// Dashboard Table (top-right corner)
+// ---------------------------------------------------------------------------
+
+if i_showDashboard and barstate.islast
+    var table dash = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 30), border_width = 1, border_color = color.gray, frame_width = 2, frame_color = color.gray)
+
+    // Row 0 – Strategy Name
+    table.cell(dash, 0, 0, "Strategy",        text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 70))
+    table.cell(dash, 1, 0, "MTF Confluence v1.0", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 70))
+
+    // Row 1 – Regime
+    table.cell(dash, 0, 1, "Regime",           text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 1, regimeText,          text_color = regimeColor, text_size = size.small)
+
+    // Row 2 – Daily Trend
+    table.cell(dash, 0, 2, "Daily Trend",      text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 2, dailyTrendText,      text_color = dailyTrendColor, text_size = size.small)
+
+    // Row 3 – 4H Momentum (RSI value)
+    table.cell(dash, 0, 3, "4H Momentum",      text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 3, "RSI " + str.tostring(fourH_RSI, "#.##"), text_color = fourH_MomColor, text_size = size.small)
+
+    // Row 4 – Current Signal
+    table.cell(dash, 0, 4, "Signal",           text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 4, currentSignal,       text_color = signalColor, text_size = size.small)
+
+    // Row 5 – ATR Stop Distance
+    table.cell(dash, 0, 5, "ATR Stop",         text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 5, str.tostring(atrStop, "#.####"), text_color = color.orange, text_size = size.small)
+
+    // Row 6 – Position Size
+    table.cell(dash, 0, 6, "Pos Size",         text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 6, str.tostring(positionSize, "#.##"), text_color = color.aqua, text_size = size.small)
+
+    // Row 7 – Session Status
+    table.cell(dash, 0, 7, "Session",          text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 7, sessionText,         text_color = sessionColor, text_size = size.small)
+
+// ---------------------------------------------------------------------------
+// Chart Plots – EMA Lines
+// ---------------------------------------------------------------------------
+
+plot(i_showEMAs ? emaFast : na, "EMA Fast", color = color.new(color.blue, 0),   linewidth = 2)
+plot(i_showEMAs ? emaSlow : na, "EMA Slow", color = color.new(color.orange, 0), linewidth = 2)
+
+// ---------------------------------------------------------------------------
+// Chart Plots – Supertrend Line (colored by direction)
+// ---------------------------------------------------------------------------
+
+stColor = stDirection < 0 ? color.green : color.red
+plot(i_showSupertrend ? stValue : na, "Supertrend", color = stColor, linewidth = 2, style = plot.style_linebr)
+
+// ---------------------------------------------------------------------------
+// Chart Plots – Buy / Sell Signal Markers
+// ---------------------------------------------------------------------------
+
+plotshape(i_showSignals and longSignal  ? low  : na, title = "Buy Signal",  text = "BUY",  textcolor = color.white, style = shape.labelup,   location = location.belowbar, color = color.green, size = size.small)
+plotshape(i_showSignals and shortSignal ? high : na, title = "Sell Signal", text = "SELL", textcolor = color.white, style = shape.labeldown, location = location.abovebar, color = color.red,   size = size.small)
