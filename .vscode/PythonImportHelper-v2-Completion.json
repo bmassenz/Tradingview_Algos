@@ -1,0 +1,405 @@
+[
+    {
+        "label": "pandas",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "pandas",
+        "description": "pandas",
+        "detail": "pandas",
+        "documentation": {}
+    },
+    {
+        "label": "numpy",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "numpy",
+        "description": "numpy",
+        "detail": "numpy",
+        "documentation": {}
+    },
+    {
+        "label": "yfinance",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "yfinance",
+        "description": "yfinance",
+        "detail": "yfinance",
+        "documentation": {}
+    },
+    {
+        "label": "Dict",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "List",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Tuple",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Optional",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Dict",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "List",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Tuple",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Callable",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Optional",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Tuple",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Optional",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "Dict",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "List",
+        "importPath": "typing",
+        "description": "typing",
+        "isExtraImport": true,
+        "detail": "typing",
+        "documentation": {}
+    },
+    {
+        "label": "dataclass",
+        "importPath": "dataclasses",
+        "description": "dataclasses",
+        "isExtraImport": true,
+        "detail": "dataclasses",
+        "documentation": {}
+    },
+    {
+        "label": "dataclass",
+        "importPath": "dataclasses",
+        "description": "dataclasses",
+        "isExtraImport": true,
+        "detail": "dataclasses",
+        "documentation": {}
+    },
+    {
+        "label": "dataclass",
+        "importPath": "dataclasses",
+        "description": "dataclasses",
+        "isExtraImport": true,
+        "detail": "dataclasses",
+        "documentation": {}
+    },
+    {
+        "label": "field",
+        "importPath": "dataclasses",
+        "description": "dataclasses",
+        "isExtraImport": true,
+        "detail": "dataclasses",
+        "documentation": {}
+    },
+    {
+        "label": "matplotlib",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "matplotlib",
+        "description": "matplotlib",
+        "detail": "matplotlib",
+        "documentation": {}
+    },
+    {
+        "label": "matplotlib.pyplot",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "matplotlib.pyplot",
+        "description": "matplotlib.pyplot",
+        "detail": "matplotlib.pyplot",
+        "documentation": {}
+    },
+    {
+        "label": "matplotlib.dates",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "matplotlib.dates",
+        "description": "matplotlib.dates",
+        "detail": "matplotlib.dates",
+        "documentation": {}
+    },
+    {
+        "label": "seaborn",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "seaborn",
+        "description": "seaborn",
+        "detail": "seaborn",
+        "documentation": {}
+    },
+    {
+        "label": "datetime",
+        "importPath": "datetime",
+        "description": "datetime",
+        "isExtraImport": true,
+        "detail": "datetime",
+        "documentation": {}
+    },
+    {
+        "label": "timedelta",
+        "importPath": "datetime",
+        "description": "datetime",
+        "isExtraImport": true,
+        "detail": "datetime",
+        "documentation": {}
+    },
+    {
+        "label": "os",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "os",
+        "description": "os",
+        "detail": "os",
+        "documentation": {}
+    },
+    {
+        "label": "warnings",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "warnings",
+        "description": "warnings",
+        "detail": "warnings",
+        "documentation": {}
+    },
+    {
+        "label": "itertools",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "itertools",
+        "description": "itertools",
+        "detail": "itertools",
+        "documentation": {}
+    },
+    {
+        "label": "ProcessPoolExecutor",
+        "importPath": "concurrent.futures",
+        "description": "concurrent.futures",
+        "isExtraImport": true,
+        "detail": "concurrent.futures",
+        "documentation": {}
+    },
+    {
+        "label": "uuid",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "uuid",
+        "description": "uuid",
+        "detail": "uuid",
+        "documentation": {}
+    },
+    {
+        "label": "DataFetcher",
+        "kind": 6,
+        "importPath": "backtest_engine",
+        "description": "backtest_engine",
+        "peekOfCode": "class DataFetcher:\n    \"\"\"Fetch and prepare OHLCV data from yfinance.\"\"\"\n    @staticmethod\n    def fetch(symbol: str, period: str = '10y', interval: str = '1d') -> pd.DataFrame:\n        \"\"\"Fetch data with error handling and NaN cleanup.\"\"\"\n        ticker = yf.Ticker(symbol)\n        try:\n            df = ticker.history(period=period, interval=interval)\n        except Exception as e:\n            raise RuntimeError(f\"Failed to fetch data for {symbol}: {e}\")",
+        "detail": "backtest_engine",
+        "documentation": {}
+    },
+    {
+        "label": "BacktestEngine",
+        "kind": 6,
+        "importPath": "backtest_engine",
+        "description": "backtest_engine",
+        "peekOfCode": "class BacktestEngine:\n    \"\"\"\n    Main backtesting engine with realistic execution simulation.\n    Handles commission (0.1%), slippage (2 pts), and position management.\n    \"\"\"\n    def __init__(self, initial_capital: float = 100000.0, commission_pct: float = 0.001,\n                 slippage_pts: float = 2.0):\n        self.initial_capital = initial_capital\n        self.commission_pct = commission_pct\n        self.slippage_pts = slippage_pts",
+        "detail": "backtest_engine",
+        "documentation": {}
+    },
+    {
+        "label": "PerformanceCalculator",
+        "kind": 6,
+        "importPath": "backtest_engine",
+        "description": "backtest_engine",
+        "peekOfCode": "class PerformanceCalculator:\n    \"\"\"Calculate all required performance metrics.\"\"\"\n    @staticmethod\n    def calculate_all(equity_curve: pd.Series, trades: pd.DataFrame,\n                      benchmark_curve: pd.Series, risk_free_rate: float = 0.04) -> dict:\n        \"\"\"\n        Calculate ALL performance metrics.\n        \"\"\"\n        daily_returns = equity_curve.pct_change().dropna()\n        trading_days = len(daily_returns)",
+        "detail": "backtest_engine",
+        "documentation": {}
+    },
+    {
+        "label": "ChartGenerator",
+        "kind": 6,
+        "importPath": "backtest_engine",
+        "description": "backtest_engine",
+        "peekOfCode": "class ChartGenerator:\n    \"\"\"Generate all 6 required performance charts.\"\"\"\n    STYLE = 'seaborn-v0_8-darkgrid'\n    def __init__(self, output_dir: str = './charts/'):\n        self.output_dir = output_dir\n        os.makedirs(output_dir, exist_ok=True)\n        try:\n            plt.style.use(self.STYLE)\n        except OSError:\n            plt.style.use('ggplot')",
+        "detail": "backtest_engine",
+        "documentation": {}
+    },
+    {
+        "label": "WalkForwardAnalyzer",
+        "kind": 6,
+        "importPath": "backtest_engine",
+        "description": "backtest_engine",
+        "peekOfCode": "class WalkForwardAnalyzer:\n    \"\"\"Walk-forward analysis with rolling windows.\"\"\"\n    def __init__(self, is_window: int = 252, oos_window: int = 63):\n        self.is_window = is_window\n        self.oos_window = oos_window\n    def analyze(self, daily_returns: pd.Series, risk_free_rate: float = 0.04) -> dict:\n        \"\"\"\n        Perform walk-forward analysis on daily returns.\n        Returns dict suitable for ChartGenerator.chart5_walk_forward().\n        \"\"\"",
+        "detail": "backtest_engine",
+        "documentation": {}
+    },
+    {
+        "label": "OptimizationResult",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class OptimizationResult:\n    best_params: dict\n    best_score: float\n    all_results: pd.DataFrame\n    sensitivity_data: dict\n    walk_forward_results: dict\nclass GridSearchOptimizer:\n    \"\"\"Step 1: Exhaustive grid search on core parameters.\"\"\"\n    def __init__(self, objective_fn: Callable, param_grid: dict):\n        \"\"\"",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "GridSearchOptimizer",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class GridSearchOptimizer:\n    \"\"\"Step 1: Exhaustive grid search on core parameters.\"\"\"\n    def __init__(self, objective_fn: Callable, param_grid: dict):\n        \"\"\"\n        objective_fn: function(params_dict) -> dict with 'sharpe', 'max_dd', 'cagr', etc.\n        param_grid: dict of param_name -> list of values to test\n        \"\"\"\n        self.objective_fn = objective_fn\n        self.param_grid = param_grid\n    def run(self, maximize: str = 'sharpe', constraint: dict = None) -> pd.DataFrame:",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "BayesianOptimizer",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class BayesianOptimizer:\n    \"\"\"Step 2: Bayesian optimization to refine top parameters.\"\"\"\n    def __init__(self, objective_fn: Callable, param_space: dict, n_initial: int = 10):\n        \"\"\"\n        param_space: dict of param_name -> (min_val, max_val) tuples\n        \"\"\"\n        self.objective_fn = objective_fn\n        self.param_space = param_space\n        self.n_initial = n_initial\n    def _random_sample(self, rng: np.random.RandomState) -> dict:",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "WalkForwardOptimizer",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class WalkForwardOptimizer:\n    \"\"\"Step 3: Rolling walk-forward optimization.\"\"\"\n    def __init__(self, data: pd.DataFrame, strategy_fn: Callable,\n                 is_window: int = 252, oos_window: int = 63):\n        \"\"\"\n        data: Full OHLCV DataFrame\n        strategy_fn: function(data, params) -> backtest_results dict with metrics\n        is_window: In-sample window in trading days (252 = ~1 year)\n        oos_window: Out-of-sample window (63 = ~3 months)\n        \"\"\"",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "RobustnessAnalyzer",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class RobustnessAnalyzer:\n    \"\"\"Step 4: Parameter sensitivity and robustness testing.\"\"\"\n    def __init__(self, objective_fn: Callable, optimal_params: dict):\n        self.objective_fn = objective_fn\n        self.optimal_params = optimal_params\n    def parameter_sensitivity(self, perturbation: float = 0.20) -> dict:\n        \"\"\"\n        Test +/- perturbation on each parameter.\n        Returns dict of param_name -> sensitivity info.\n        \"\"\"",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "StrategyOptimizer",
+        "kind": 6,
+        "importPath": "optimizer",
+        "description": "optimizer",
+        "peekOfCode": "class StrategyOptimizer:\n    \"\"\"Main optimizer that orchestrates all optimization steps.\"\"\"\n    def __init__(self, data: pd.DataFrame, strategy_fn: Callable):\n        \"\"\"\n        data: OHLCV DataFrame\n        strategy_fn: function(data, params_dict) -> dict with metrics\n        \"\"\"\n        self.data = data\n        self.strategy_fn = strategy_fn\n    def run_full_optimization(self) -> dict:",
+        "detail": "optimizer",
+        "documentation": {}
+    },
+    {
+        "label": "StrategyParams",
+        "kind": 6,
+        "importPath": "strategy",
+        "description": "strategy",
+        "peekOfCode": "class StrategyParams:\n    \"\"\"Core strategy parameters (max 8 free parameters).\"\"\"\n    ema_fast: int = 50\n    ema_slow: int = 200\n    supertrend_period: int = 10\n    supertrend_mult: float = 3.0\n    rsi_period: int = 14\n    rsi_oversold: int = 30\n    rsi_overbought: int = 70\n    atr_period: int = 14",
+        "detail": "strategy",
+        "documentation": {}
+    },
+    {
+        "label": "MTFStrategySignals",
+        "kind": 6,
+        "importPath": "strategy",
+        "description": "strategy",
+        "peekOfCode": "class MTFStrategySignals:\n    \"\"\"\n    Signal generation engine replicating PineScript MTF logic.\n    Uses pandas resample() for multi-timeframe alignment.\n    \"\"\"\n    def __init__(self, params: StrategyParams = None):\n        self.params = params or StrategyParams()\n    # ------------------------------------------------------------------\n    # Indicator calculations\n    # ------------------------------------------------------------------",
+        "detail": "strategy",
+        "documentation": {}
+    },
+    {
+        "label": "PositionManager",
+        "kind": 6,
+        "importPath": "strategy",
+        "description": "strategy",
+        "peekOfCode": "class PositionManager:\n    \"\"\"Position sizing and risk management.\"\"\"\n    def __init__(self, params: StrategyParams = None,\n                 starting_equity: float = 100000.0):\n        self.params = params or StrategyParams()\n        self.positions: List[Dict] = []\n        self.closed_positions: List[Dict] = []\n        self.equity = starting_equity\n        self._next_id = 0\n    def calculate_position_size(self, equity: float, entry: float,",
+        "detail": "strategy",
+        "documentation": {}
+    },
+    {
+        "label": "PerformanceReporter",
+        "kind": 6,
+        "importPath": "strategy",
+        "description": "strategy",
+        "peekOfCode": "class PerformanceReporter:\n    \"\"\"Calculate all performance metrics and generate visualizations.\"\"\"\n    @staticmethod\n    def calculate_metrics(equity_curve: pd.Series,\n                          trades: pd.DataFrame,\n                          benchmark: pd.Series) -> dict:\n        \"\"\"\n        Calculate ALL required metrics:\n        - Total Return, CAGR, Sharpe, Sortino, Max Drawdown, Calmar\n        - Win Rate, Profit Factor, Recovery Factor",
+        "detail": "strategy",
+        "documentation": {}
+    },
+    {
+        "label": "run_backtest",
+        "kind": 2,
+        "importPath": "strategy",
+        "description": "strategy",
+        "peekOfCode": "def run_backtest(df_1h: pd.DataFrame,\n                 params: StrategyParams = None,\n                 starting_equity: float = 100000.0,\n                 benchmark: pd.Series = None) -> Dict:\n    \"\"\"\n    End-to-end backtest:\n      1. Generate signals\n      2. Simulate positions with PositionManager\n      3. Compute metrics and charts\n    Parameters",
+        "detail": "strategy",
+        "documentation": {}
+    }
+]
