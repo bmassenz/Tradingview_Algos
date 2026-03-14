@@ -16,20 +16,20 @@ warnings.filterwarnings('ignore')
 
 @dataclass
 class StrategyParams:
-    """Core strategy parameters (max 8 free parameters)."""
-    ema_fast: int = 50
-    ema_slow: int = 200
+    """Core strategy parameters."""
+    ema_fast: int = 21
+    ema_slow: int = 55
     supertrend_period: int = 10
-    supertrend_mult: float = 3.0
+    supertrend_mult: float = 2.5
     rsi_period: int = 14
-    rsi_oversold: int = 30
-    rsi_overbought: int = 70
+    rsi_oversold: int = 35
+    rsi_overbought: int = 65
     atr_period: int = 14
-    atr_sl_mult: float = 2.0
-    atr_tp_mult: float = 3.0
+    atr_sl_mult: float = 2.5
+    atr_tp_mult: float = 5.0
     adx_period: int = 14
-    adx_trend_threshold: int = 25
-    adx_range_threshold: int = 20
+    adx_trend_threshold: int = 20
+    adx_range_threshold: int = 15
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
@@ -39,11 +39,21 @@ class StrategyParams:
     volume_ma_period: int = 20
     bb_period: int = 20
     bb_std: float = 2.0
-    max_risk_pct: float = 0.01  # 1% risk per trade
+    max_risk_pct: float = 0.02  # 2% risk per trade
     max_positions: int = 3
     commission_pct: float = 0.001  # 0.1%
     slippage_pts: float = 2.0
     drawdown_reduce_threshold: float = 0.05  # 5% rolling DD triggers 50% size reduction
+    # Signal persistence: how many bars a crossover signal stays valid
+    momentum_signal_persistence: int = 6  # 4H bars (~24 hours)
+    stoch_signal_persistence: int = 4  # 1H bars
+    # Confluence scoring: minimum score to trigger entry (out of 5)
+    min_confluence_score: int = 3
+    # Partial profit taking
+    partial_tp_pct: float = 0.5  # close 50% at first TP
+    partial_tp_mult: float = 3.0  # first TP at 3x ATR
+    # Trend re-entry: allow re-entry on pullback within a trend
+    reentry_pullback_atr: float = 1.5  # pullback depth in ATR units
 
 
 class MTFStrategySignals:
@@ -299,6 +309,21 @@ class MTFStrategySignals:
         return aligned
 
     # ------------------------------------------------------------------
+    # Signal persistence helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_persistence(signal: pd.Series, window: int) -> pd.Series:
+        """
+        Keep a boolean crossover signal 'alive' for `window` bars after it fires.
+        This solves the core problem: crossover events are instantaneous but
+        we need them to persist so multiple timeframes can align.
+        """
+        if window <= 1:
+            return signal.astype(float)
+        return signal.astype(float).rolling(window=window, min_periods=1).max()
+
+    # ------------------------------------------------------------------
     # Main signal generation
     # ------------------------------------------------------------------
 
@@ -306,31 +331,29 @@ class MTFStrategySignals:
                          df_4h: pd.DataFrame = None,
                          df_daily: pd.DataFrame = None) -> pd.DataFrame:
         """
-        Main signal generator replicating PineScript MTF AND logic:
-          1. Daily trend filter  (EMA cross + Supertrend + ADX regime)
-          2. 4H momentum filter  (RSI crossover + MACD crossover)
-          3. 1H entry trigger    (Stochastic + Volume confirmation)
+        Improved signal generator using confluence scoring and signal persistence.
+
+        Key improvements over v1:
+          1. Signal persistence - crossover signals stay valid for N bars
+          2. Confluence scoring - score 0-5, enter when >= min_confluence_score
+          3. Mean-reversion mode - BB entries when ADX shows ranging market
+          4. Trend re-entry - pullback entries within established trends
+          5. Wider stops + partial TP - let winners run, take partial profits early
 
         Parameters
         ----------
         df_1h : pd.DataFrame
-            1-hour OHLCV data (primary timeframe). Must have columns:
-            open, high, low, close, volume  with DatetimeIndex.
-        df_4h : pd.DataFrame, optional
-            4-hour OHLCV data. If None, resampled from df_1h.
-        df_daily : pd.DataFrame, optional
-            Daily OHLCV data. If None, resampled from df_1h.
+            1-hour OHLCV data with DatetimeIndex (columns: open, high, low, close, volume).
+        df_4h, df_daily : pd.DataFrame, optional
+            Higher timeframe data. Resampled from df_1h if not supplied.
 
         Returns
         -------
-        pd.DataFrame
-            Indexed like df_1h with columns:
-            signal (1=long, -1=short, 0=flat), stop_loss, take_profit,
-            position_size, regime ('trend' or 'range').
+        pd.DataFrame with columns: signal, stop_loss, take_profit,
+            partial_tp, position_size, regime, confluence_score
         """
         p = self.params
 
-        # --- Build HTF dataframes if not supplied ---
         if df_4h is None:
             df_4h = self.resample_to_timeframe(df_1h, '4h')
         if df_daily is None:
@@ -339,7 +362,7 @@ class MTFStrategySignals:
         idx = df_1h.index
 
         # ==============================================================
-        # 1. DAILY TREND  (getTrend + getRegime from PineScript)
+        # 1. DAILY TREND LAYER
         # ==============================================================
         d_ema_fast = self.calculate_ema(df_daily['close'], p.ema_fast)
         d_ema_slow = self.calculate_ema(df_daily['close'], p.ema_slow)
@@ -353,106 +376,174 @@ class MTFStrategySignals:
         d_st_dir_1h = self.align_htf_to_ltf(d_st_dir, idx)
         d_adx_1h = self.align_htf_to_ltf(d_adx, idx)
 
-        # PineScript: bullish = emaF > emaS AND stDir < 0
-        #             bearish = emaF < emaS AND stDir > 0
-        daily_bull = (d_ema_fast_1h > d_ema_slow_1h) & (d_st_dir_1h < 0)
-        daily_bear = (d_ema_fast_1h < d_ema_slow_1h) & (d_st_dir_1h > 0)
+        # EMA trend direction (continuous, not crossover-dependent)
+        ema_bull = d_ema_fast_1h > d_ema_slow_1h
+        ema_bear = d_ema_fast_1h < d_ema_slow_1h
+
+        # Supertrend direction (continuous)
+        st_bull = d_st_dir_1h < 0  # Pine convention: -1 = bullish
+        st_bear = d_st_dir_1h > 0
 
         # Regime
         is_trending = d_adx_1h >= p.adx_trend_threshold
         is_ranging = d_adx_1h <= p.adx_range_threshold
-        regime = pd.Series('range', index=idx)
+        regime = pd.Series('neutral', index=idx)
         regime[is_trending] = 'trend'
+        regime[is_ranging] = 'range'
 
         # ==============================================================
-        # 2. 4H MOMENTUM  (getMomentum from PineScript)
+        # 2. 4H MOMENTUM LAYER (with signal persistence)
         # ==============================================================
         h4_rsi = self.calculate_rsi(df_4h['close'], p.rsi_period)
         h4_macd_line, h4_macd_signal, _ = self.calculate_macd(
             df_4h['close'], p.macd_fast, p.macd_slow, p.macd_signal
         )
 
-        # Crossover / crossunder detection on 4H
-        # RSI buy: crossover(rsi, oversold) -> rsi crosses above oversold
+        # RSI crossovers with persistence
         h4_rsi_prev = h4_rsi.shift(1)
-        h4_rsi_buy = (h4_rsi > p.rsi_oversold) & (h4_rsi_prev <= p.rsi_oversold)
-        h4_rsi_sell = (h4_rsi < p.rsi_overbought) & (h4_rsi_prev >= p.rsi_overbought)
+        h4_rsi_buy_raw = (h4_rsi > p.rsi_oversold) & (h4_rsi_prev <= p.rsi_oversold)
+        h4_rsi_sell_raw = (h4_rsi < p.rsi_overbought) & (h4_rsi_prev >= p.rsi_overbought)
+        h4_rsi_buy = self._apply_persistence(h4_rsi_buy_raw, p.momentum_signal_persistence)
+        h4_rsi_sell = self._apply_persistence(h4_rsi_sell_raw, p.momentum_signal_persistence)
 
-        # MACD buy: crossover(macdLine, macdSignal)
+        # MACD crossovers with persistence
         h4_macd_prev = h4_macd_line.shift(1)
         h4_sig_prev = h4_macd_signal.shift(1)
-        h4_macd_buy = (h4_macd_line > h4_macd_signal) & (h4_macd_prev <= h4_sig_prev)
-        h4_macd_sell = (h4_macd_line < h4_macd_signal) & (h4_macd_prev >= h4_sig_prev)
+        h4_macd_buy_raw = (h4_macd_line > h4_macd_signal) & (h4_macd_prev <= h4_sig_prev)
+        h4_macd_sell_raw = (h4_macd_line < h4_macd_signal) & (h4_macd_prev >= h4_sig_prev)
+        h4_macd_buy = self._apply_persistence(h4_macd_buy_raw, p.momentum_signal_persistence)
+        h4_macd_sell = self._apply_persistence(h4_macd_sell_raw, p.momentum_signal_persistence)
 
-        # Convert booleans to float for alignment (PineScript security returns 0/1)
-        h4_rsi_buy_f = h4_rsi_buy.astype(float)
-        h4_rsi_sell_f = h4_rsi_sell.astype(float)
-        h4_macd_buy_f = h4_macd_buy.astype(float)
-        h4_macd_sell_f = h4_macd_sell.astype(float)
+        # Also use RSI level as a continuous momentum indicator
+        h4_rsi_1h = self.align_htf_to_ltf(h4_rsi, idx)
+        rsi_bullish_zone = h4_rsi_1h > 50  # RSI above 50 = bullish momentum
+        rsi_bearish_zone = h4_rsi_1h < 50
 
-        # Align 4H -> 1H
-        rsi_buy_1h = self.align_htf_to_ltf(h4_rsi_buy_f, idx)
-        rsi_sell_1h = self.align_htf_to_ltf(h4_rsi_sell_f, idx)
-        macd_buy_1h = self.align_htf_to_ltf(h4_macd_buy_f, idx)
-        macd_sell_1h = self.align_htf_to_ltf(h4_macd_sell_f, idx)
+        # Align crossover persistence to 1H
+        rsi_buy_1h = self.align_htf_to_ltf(h4_rsi_buy, idx).fillna(0)
+        rsi_sell_1h = self.align_htf_to_ltf(h4_rsi_sell, idx).fillna(0)
+        macd_buy_1h = self.align_htf_to_ltf(h4_macd_buy, idx).fillna(0)
+        macd_sell_1h = self.align_htf_to_ltf(h4_macd_sell, idx).fillna(0)
 
-        # Momentum buy = rsiBuy OR macdBuy  (either momentum signal is valid)
-        mom_buy = (rsi_buy_1h > 0) | (macd_buy_1h > 0)
-        mom_sell = (rsi_sell_1h > 0) | (macd_sell_1h > 0)
+        # Momentum signals (any crossover active OR RSI in favourable zone)
+        mom_buy = (rsi_buy_1h > 0) | (macd_buy_1h > 0) | rsi_bullish_zone
+        mom_sell = (rsi_sell_1h > 0) | (macd_sell_1h > 0) | rsi_bearish_zone
 
         # ==============================================================
-        # 3. 1H ENTRY  (getVolume + Stochastic from PineScript)
+        # 3. 1H ENTRY LAYER (with persistence)
         # ==============================================================
         stoch_k, stoch_d = self.calculate_stochastic(
             df_1h, p.stoch_k, p.stoch_d, p.stoch_smooth
         )
-
-        # Stochastic crossover for entry timing
         stoch_k_prev = stoch_k.shift(1)
         stoch_d_prev = stoch_d.shift(1)
-        stoch_buy = (stoch_k > stoch_d) & (stoch_k_prev <= stoch_d_prev)
-        stoch_sell = (stoch_k < stoch_d) & (stoch_k_prev >= stoch_d_prev)
 
-        # Volume confirmation
+        # Stochastic crossover (relaxed: no extreme zone requirement)
+        stoch_buy_raw = (stoch_k > stoch_d) & (stoch_k_prev <= stoch_d_prev)
+        stoch_sell_raw = (stoch_k < stoch_d) & (stoch_k_prev >= stoch_d_prev)
+        stoch_buy = self._apply_persistence(stoch_buy_raw, p.stoch_signal_persistence)
+        stoch_sell = self._apply_persistence(stoch_sell_raw, p.stoch_signal_persistence)
+
+        # Volume confirmation (relaxed: 80% of average is enough)
         vol_sma = df_1h['volume'].rolling(window=p.volume_ma_period,
                                           min_periods=1).mean()
-        vol_above_avg = df_1h['volume'] > vol_sma
-
-        # Entry triggers
-        entry_buy = stoch_buy & vol_above_avg
-        entry_sell = stoch_sell & vol_above_avg
+        vol_confirm = df_1h['volume'] > (vol_sma * 0.8)
 
         # ==============================================================
-        # 4. COMBINE WITH AND LOGIC
+        # 4. MEAN-REVERSION LAYER (Bollinger Band entries for ranging)
         # ==============================================================
-        long_signal = daily_bull & mom_buy & entry_buy
-        short_signal = daily_bear & mom_sell & entry_sell
-
-        signal = pd.Series(0, index=idx, dtype=int)
-        signal[long_signal] = 1
-        signal[short_signal] = -1
+        bb_upper, bb_mid, bb_lower = self.calculate_bollinger_bands(
+            df_1h['close'], p.bb_period, p.bb_std
+        )
+        # Price near lower BB = long opportunity in range
+        bb_long = (df_1h['close'] <= bb_lower * 1.005) & is_ranging
+        # Price near upper BB = short opportunity in range
+        bb_short = (df_1h['close'] >= bb_upper * 0.995) & is_ranging
 
         # ==============================================================
-        # 5. DYNAMIC SL / TP  (calcStopTakeProfit from PineScript)
+        # 5. TREND RE-ENTRY (pullback within established trend)
         # ==============================================================
         atr_1h = self.calculate_atr(df_1h, p.atr_period)
         close_1h = df_1h['close']
 
+        # Price pulled back to fast EMA in an uptrend = re-entry opportunity
+        pullback_to_ema_long = (
+            ema_bull & st_bull &
+            (close_1h <= d_ema_fast_1h * 1.005) &
+            (close_1h >= d_ema_fast_1h - p.reentry_pullback_atr * atr_1h)
+        )
+        pullback_to_ema_short = (
+            ema_bear & st_bear &
+            (close_1h >= d_ema_fast_1h * 0.995) &
+            (close_1h <= d_ema_fast_1h + p.reentry_pullback_atr * atr_1h)
+        )
+
+        # ==============================================================
+        # 6. CONFLUENCE SCORING (0-5 points)
+        # ==============================================================
+        # Each condition contributes 1 point. Need min_confluence_score to enter.
+        long_score = (
+            ema_bull.astype(int) +          # 1: Daily EMA trend bullish
+            st_bull.astype(int) +           # 2: Daily Supertrend bullish
+            mom_buy.astype(int) +           # 3: 4H momentum bullish
+            (stoch_buy > 0).astype(int) +   # 4: Stochastic entry signal
+            vol_confirm.astype(int)         # 5: Volume confirmation
+        )
+        short_score = (
+            ema_bear.astype(int) +
+            st_bear.astype(int) +
+            mom_sell.astype(int) +
+            (stoch_sell > 0).astype(int) +
+            vol_confirm.astype(int)
+        )
+
+        # Trend-following entries: confluence score >= threshold
+        trend_long = long_score >= p.min_confluence_score
+        trend_short = short_score >= p.min_confluence_score
+
+        # Mean-reversion entries: BB touch + basic trend alignment + volume
+        rev_long = bb_long & ema_bull & vol_confirm
+        rev_short = bb_short & ema_bear & vol_confirm
+
+        # Re-entry entries: pullback + momentum + volume
+        reentry_long = pullback_to_ema_long & mom_buy & vol_confirm
+        reentry_short = pullback_to_ema_short & mom_sell & vol_confirm
+
+        # Combined signal
+        long_signal = trend_long | rev_long | reentry_long
+        short_signal = trend_short | rev_short | reentry_short
+
+        signal = pd.Series(0, index=idx, dtype=int)
+        signal[long_signal] = 1
+        signal[short_signal] = -1
+        # Long takes priority on conflicts
+        signal[long_signal & short_signal] = 0
+
+        # ==============================================================
+        # 7. DYNAMIC SL / TP with partial profit taking
+        # ==============================================================
         sl_long = close_1h - p.atr_sl_mult * atr_1h
         tp_long = close_1h + p.atr_tp_mult * atr_1h
         sl_short = close_1h + p.atr_sl_mult * atr_1h
         tp_short = close_1h - p.atr_tp_mult * atr_1h
 
+        # Partial TP (first target, closer)
+        partial_tp_long = close_1h + p.partial_tp_mult * atr_1h
+        partial_tp_short = close_1h - p.partial_tp_mult * atr_1h
+
         stop_loss = pd.Series(np.nan, index=idx)
         take_profit = pd.Series(np.nan, index=idx)
+        partial_tp = pd.Series(np.nan, index=idx)
 
         stop_loss[signal == 1] = sl_long[signal == 1]
         stop_loss[signal == -1] = sl_short[signal == -1]
         take_profit[signal == 1] = tp_long[signal == 1]
         take_profit[signal == -1] = tp_short[signal == -1]
+        partial_tp[signal == 1] = partial_tp_long[signal == 1]
+        partial_tp[signal == -1] = partial_tp_short[signal == -1]
 
         # ==============================================================
-        # 6. POSITION SIZE  (calcPositionSize from PineScript)
+        # 8. POSITION SIZE
         # ==============================================================
         risk_per_unit = (close_1h - stop_loss).abs()
         risk_per_unit = risk_per_unit.replace(0, np.nan)
@@ -461,14 +552,17 @@ class MTFStrategySignals:
         position_size[signal == 0] = 0.0
 
         # ==============================================================
-        # 7. BUILD RESULT
+        # 9. BUILD RESULT
         # ==============================================================
         result = pd.DataFrame({
             'signal': signal,
             'stop_loss': stop_loss,
             'take_profit': take_profit,
+            'partial_tp': partial_tp,
             'position_size': position_size,
             'regime': regime,
+            'confluence_score': long_score.where(signal == 1,
+                                short_score.where(signal == -1, 0)),
         }, index=idx)
 
         return result
@@ -520,10 +614,12 @@ class PositionManager:
         return len(self.positions) < self.params.max_positions
 
     def open_position(self, entry: float, stop: float, tp: float,
-                      size: float, direction: int) -> Dict:
+                      size: float, direction: int,
+                      partial_tp: float = None) -> Dict:
         """
         Open a new position.
         direction: 1 = long, -1 = short.
+        partial_tp: first profit target where we close partial_tp_pct of position.
         Returns the position dict.
         """
         if not self.can_open_position():
@@ -535,7 +631,10 @@ class PositionManager:
             'entry': entry,
             'stop_loss': stop,
             'take_profit': tp,
+            'partial_tp': partial_tp,
+            'partial_taken': False,
             'size': size,
+            'original_size': size,
             'direction': direction,
             'trail_stop': stop,
             'pnl': 0.0,
@@ -601,8 +700,8 @@ class PositionManager:
 
     def check_stops(self, current_bar: pd.Series) -> List[Dict]:
         """
-        Check if any open position's stop or take-profit has been hit
-        during the current bar. Returns list of closed positions.
+        Check if any open position's stop, take-profit, or partial TP has been hit.
+        Returns list of closed positions (partial closes generate a separate record).
         """
         closed = []
         high = current_bar['high']
@@ -620,6 +719,26 @@ class PositionManager:
                 elif high >= pos['take_profit']:
                     hit = True
                     exit_price = pos['take_profit']
+                elif (not pos['partial_taken'] and pos['partial_tp'] is not None
+                      and high >= pos['partial_tp']):
+                    # Partial profit: close a portion, move stop to breakeven
+                    partial_size = pos['size'] * self.params.partial_tp_pct
+                    partial_pnl = pos['direction'] * (pos['partial_tp'] - pos['entry']) * partial_size
+                    commission = (self.params.commission_pct * pos['entry'] * partial_size +
+                                  self.params.commission_pct * pos['partial_tp'] * partial_size)
+                    partial_pnl -= commission
+                    self.equity += partial_pnl
+                    pos['size'] -= partial_size
+                    pos['partial_taken'] = True
+                    pos['stop_loss'] = pos['entry']  # move stop to breakeven
+                    pos['trail_stop'] = max(pos['trail_stop'], pos['entry'])
+                    closed.append({
+                        'id': pos['id'], 'entry': pos['entry'],
+                        'exit': pos['partial_tp'], 'direction': pos['direction'],
+                        'size': partial_size, 'pnl': partial_pnl,
+                        'status': 'partial_close',
+                    })
+                    continue
             else:  # short
                 effective_stop = min(pos['stop_loss'], pos['trail_stop'])
                 if high >= effective_stop:
@@ -628,6 +747,25 @@ class PositionManager:
                 elif low <= pos['take_profit']:
                     hit = True
                     exit_price = pos['take_profit']
+                elif (not pos['partial_taken'] and pos['partial_tp'] is not None
+                      and low <= pos['partial_tp']):
+                    partial_size = pos['size'] * self.params.partial_tp_pct
+                    partial_pnl = pos['direction'] * (pos['partial_tp'] - pos['entry']) * partial_size
+                    commission = (self.params.commission_pct * pos['entry'] * partial_size +
+                                  self.params.commission_pct * pos['partial_tp'] * partial_size)
+                    partial_pnl -= commission
+                    self.equity += partial_pnl
+                    pos['size'] -= partial_size
+                    pos['partial_taken'] = True
+                    pos['stop_loss'] = pos['entry']
+                    pos['trail_stop'] = min(pos['trail_stop'], pos['entry'])
+                    closed.append({
+                        'id': pos['id'], 'entry': pos['entry'],
+                        'exit': pos['partial_tp'], 'direction': pos['direction'],
+                        'size': partial_size, 'pnl': partial_pnl,
+                        'status': 'partial_close',
+                    })
+                    continue
 
             if hit:
                 result = self.close_position(pos['id'], exit_price)
@@ -983,6 +1121,7 @@ def run_backtest(df_1h: pd.DataFrame,
             entry_price = bar['close']
             sl = sig['stop_loss']
             tp = sig['take_profit']
+            partial_tp = sig.get('partial_tp', np.nan)
             direction = int(sig['signal'])
 
             if not np.isnan(sl) and not np.isnan(tp):
@@ -1001,8 +1140,9 @@ def run_backtest(df_1h: pd.DataFrame,
                 ) * size_mult
 
                 if size > 0:
+                    ptp = partial_tp if not np.isnan(partial_tp) else None
                     pos = pm.open_position(entry_price, sl, tp, size,
-                                           direction)
+                                           direction, partial_tp=ptp)
                     if pos:
                         pos['entry_time'] = ts
 

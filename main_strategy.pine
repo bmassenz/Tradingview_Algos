@@ -3,7 +3,7 @@
 
 //@version=6
 strategy(
-     "Multi-Timeframe Confluence Strategy",
+     "Multi-Timeframe Confluence Strategy v2",
      overlay          = true,
      commission_value = 0.1,
      commission_type  = strategy.commission.percent,
@@ -16,24 +16,37 @@ strategy(
      )
 
 // ============================================================================
-// SECTION 1 -- INPUT PARAMETERS (8 core free parameters)
+// SECTION 1 -- INPUT PARAMETERS
 // ============================================================================
 
-// Trend layer
-i_emaFast       = input.int(50,    "EMA Fast Length",        minval=5,   maxval=200,  group="Trend")
-i_emaSlow       = input.int(200,   "EMA Slow Length",        minval=50,  maxval=500,  group="Trend")
-i_supertrendMul = input.float(3.0, "Supertrend Multiplier",  minval=1.0, maxval=6.0,  step=0.5, group="Trend")
+// Trend layer (faster EMAs to catch trends earlier)
+i_emaFast       = input.int(21,    "EMA Fast Length",        minval=5,   maxval=100,  group="Trend")
+i_emaSlow       = input.int(55,    "EMA Slow Length",        minval=20,  maxval=200,  group="Trend")
+i_supertrendMul = input.float(2.5, "Supertrend Multiplier",  minval=1.0, maxval=6.0,  step=0.5, group="Trend")
 
 // Setup / entry layer
 i_rsiLen        = input.int(14,    "RSI / Stoch Length",     minval=5,   maxval=30,   group="Setup")
-i_adxThreshHigh = input.int(25,    "ADX Trend Threshold",    minval=15,  maxval=40,   group="Setup")
-i_adxThreshLow  = input.int(20,    "ADX Range Threshold",    minval=10,  maxval=30,   group="Setup")
+i_adxThreshHigh = input.int(20,    "ADX Trend Threshold",    minval=10,  maxval=40,   group="Setup")
+i_adxThreshLow  = input.int(15,    "ADX Range Threshold",    minval=5,   maxval=25,   group="Setup")
+i_rsiOversold   = input.int(35,    "RSI Oversold Level",     minval=20,  maxval=45,   group="Setup")
+i_rsiOverbought = input.int(65,    "RSI Overbought Level",   minval=55,  maxval=80,   group="Setup")
 
-// Risk
-i_atrSlMul      = input.float(2.0, "ATR Stop-Loss Multiple", minval=0.5, maxval=5.0,  step=0.5, group="Risk")
-i_atrTpMul      = input.float(3.0, "ATR Take-Profit Multiple", minval=1.0, maxval=8.0, step=0.5, group="Risk")
+// Risk (wider stops, much wider TP for trend riding)
+i_atrSlMul      = input.float(2.5, "ATR Stop-Loss Multiple", minval=0.5, maxval=5.0,  step=0.5, group="Risk")
+i_atrTpMul      = input.float(5.0, "ATR Take-Profit Multiple", minval=2.0, maxval=10.0, step=0.5, group="Risk")
+i_riskPct       = input.float(2.0, "Risk Per Trade %",       minval=0.5, maxval=5.0,  step=0.5, group="Risk")
+i_partialTpMul  = input.float(3.0, "Partial TP ATR Multiple", minval=1.0, maxval=6.0, step=0.5, group="Risk")
+i_partialPct    = input.float(50,  "Partial Close %",        minval=25,  maxval=75,   step=25,  group="Risk")
 
-// Session filter (exchange local time)
+// Confluence
+i_minConfluence = input.int(3,     "Min Confluence Score (of 5)", minval=2, maxval=5, group="Confluence")
+i_momPersist    = input.int(6,     "Momentum Signal Persistence (4H bars)", minval=1, maxval=12, group="Confluence")
+i_stochPersist  = input.int(4,     "Stoch Signal Persistence (1H bars)",    minval=1, maxval=8,  group="Confluence")
+
+// Re-entry
+i_reentryATR    = input.float(1.5, "Pullback Re-entry ATR Depth", minval=0.5, maxval=3.0, step=0.5, group="Re-entry")
+
+// Session filter
 i_sessStart     = input.int(30,    "Session buffer minutes",  minval=0, maxval=120,   group="Session",
                      tooltip="Avoid first/last N minutes of the session")
 
@@ -41,7 +54,6 @@ i_sessStart     = input.int(30,    "Session buffer minutes",  minval=0, maxval=1
 // SECTION 2 -- HELPER FUNCTIONS
 // ============================================================================
 
-// Directional Movement / ADX calculation (Pine v6 compatible)
 adx(len) =>
     up   = ta.change(high)
     down = -ta.change(low)
@@ -54,7 +66,6 @@ adx(len) =>
     adxVal = ta.rma(dx, len)
     [adxVal, plusDI, minusDI]
 
-// Supertrend calculation
 supertrend(factor, atrLen) =>
     src    = hl2
     atrVal = ta.atr(atrLen)
@@ -70,11 +81,16 @@ supertrend(factor, atrLen) =>
     stLine = dir == 1 ? lowerBand : upperBand
     [stLine, dir]
 
+// Signal persistence: keep a crossover signal alive for N bars
+persist(src, window) =>
+    var float result = 0.0
+    result := src ? 1.0 : (result > 0 and bar_index - ta.barssince(src) < window ? 1.0 : 0.0)
+    result > 0
+
 // ============================================================================
 // SECTION 3 -- DAILY TIMEFRAME INDICATORS (TREND LAYER)
 // ============================================================================
 
-// --- EMA 50 / 200 ---
 d_emaFast = request.security(syminfo.tickerid, "D", ta.ema(close, i_emaFast),
              lookahead = barmerge.lookahead_off)
 d_emaSlow = request.security(syminfo.tickerid, "D", ta.ema(close, i_emaSlow),
@@ -83,18 +99,15 @@ d_emaSlow = request.security(syminfo.tickerid, "D", ta.ema(close, i_emaSlow),
 d_emaUptrend   = d_emaFast > d_emaSlow
 d_emaDowntrend = d_emaFast < d_emaSlow
 
-// --- Supertrend (Daily) ---
 [d_stLine_raw, d_stDir_raw] = request.security(syminfo.tickerid, "D",
              supertrend(i_supertrendMul, 10),
              lookahead = barmerge.lookahead_off)
 d_stBullish = d_stDir_raw == 1
 d_stBearish = d_stDir_raw == -1
 
-// Detect supertrend flips on the daily
 d_stFlipBear = d_stBullish[1] and d_stBearish
 d_stFlipBull = d_stBearish[1] and d_stBullish
 
-// --- ADX (Daily) ---
 [d_adxVal, d_plusDI, d_minusDI] = request.security(syminfo.tickerid, "D",
              adx(14),
              lookahead = barmerge.lookahead_off)
@@ -103,43 +116,57 @@ d_trending = d_adxVal > i_adxThreshHigh
 d_ranging  = d_adxVal < i_adxThreshLow
 
 // ============================================================================
-// SECTION 4 -- 4-HOUR TIMEFRAME INDICATORS (SETUP LAYER)
+// SECTION 4 -- 4-HOUR TIMEFRAME INDICATORS (MOMENTUM LAYER with persistence)
 // ============================================================================
 
-// --- RSI (4H) ---
 h4_rsi = request.security(syminfo.tickerid, "240", ta.rsi(close, i_rsiLen),
              lookahead = barmerge.lookahead_off)
 
-h4_rsiCrossAbove30 = ta.crossover(h4_rsi, 30)
-h4_rsiCrossBelow70 = ta.crossunder(h4_rsi, 70)
+// RSI crossovers with persistence (signal stays alive for N bars)
+h4_rsiCrossAboveRaw = ta.crossover(h4_rsi, i_rsiOversold)
+h4_rsiCrossBelowRaw = ta.crossunder(h4_rsi, i_rsiOverbought)
+h4_rsiCrossAbove = persist(h4_rsiCrossAboveRaw, i_momPersist)
+h4_rsiCrossBelow = persist(h4_rsiCrossBelowRaw, i_momPersist)
 
-// --- MACD (4H) ---
+// RSI zone as continuous momentum (RSI > 50 = bullish momentum)
+h4_rsiBullZone = h4_rsi > 50
+h4_rsiBearZone = h4_rsi < 50
+
 [h4_macdLine, h4_signal, h4_hist] = request.security(syminfo.tickerid, "240",
              ta.macd(close, 12, 26, 9),
              lookahead = barmerge.lookahead_off)
 
-h4_macdBullCross = ta.crossover(h4_macdLine, h4_signal)
-h4_macdBearCross = ta.crossunder(h4_macdLine, h4_signal)
+// MACD crossovers with persistence
+h4_macdBullRaw = ta.crossover(h4_macdLine, h4_signal)
+h4_macdBearRaw = ta.crossunder(h4_macdLine, h4_signal)
+h4_macdBullCross = persist(h4_macdBullRaw, i_momPersist)
+h4_macdBearCross = persist(h4_macdBearRaw, i_momPersist)
+
+// Momentum = any crossover active OR RSI in favourable zone
+momBull = h4_rsiCrossAbove or h4_macdBullCross or h4_rsiBullZone
+momBear = h4_rsiCrossBelow or h4_macdBearCross or h4_rsiBearZone
 
 // ============================================================================
 // SECTION 5 -- CHART TIMEFRAME INDICATORS (ENTRY LAYER)
 // ============================================================================
 
-// --- Stochastic (14, 3, 3) ---
+// Stochastic with persistence (relaxed: no extreme zone requirement)
 stochK = ta.sma(ta.stoch(close, high, low, i_rsiLen), 3)
 stochD = ta.sma(stochK, 3)
 
-stochBullCross = ta.crossover(stochK, stochD) and stochK < 30
-stochBearCross = ta.crossunder(stochK, stochD) and stochK > 70
+stochBullRaw = ta.crossover(stochK, stochD)
+stochBearRaw = ta.crossunder(stochK, stochD)
+stochBullCross = persist(stochBullRaw, i_stochPersist)
+stochBearCross = persist(stochBearRaw, i_stochPersist)
 
-// --- Volume confirmation ---
+// Volume confirmation (relaxed: 80% of average)
 volSma     = ta.sma(volume, 20)
-volConfirm = volume > volSma
+volConfirm = volume > volSma * 0.8
 
-// --- ATR for stops ---
+// ATR for stops
 atrVal = ta.atr(14)
 
-// --- Bollinger Bands (used in ranging/mean-reversion mode) ---
+// Bollinger Bands (mean-reversion mode)
 bbBasis  = ta.sma(close, 20)
 bbDev    = 2.0 * ta.stdev(close, 20)
 bbUpper  = bbBasis + bbDev
@@ -149,32 +176,45 @@ bbLower  = bbBasis - bbDev
 // SECTION 6 -- SESSION FILTER
 // ============================================================================
 
-// Avoid first and last N minutes of the regular session.
-// Works for any exchange; uses session() to detect the regular session window.
 var int sessionMinutes = na
 if session.ismarket
     sessionMinutes := (hour * 60 + minute)
 
 inSessionBody = session.ismarket
 notFirstMins  = not na(sessionMinutes) ? (minute >= i_sessStart or hour > 0) : true
-// We approximate "not in last 30 min" by checking bar_index is not near session end
 sessionOk     = barstate.isconfirmed and inSessionBody
 
 // ============================================================================
 // SECTION 7 -- REGIME DETECTION
 // ============================================================================
 
-regime_trend = d_trending               // ADX > 25
-regime_range = d_ranging                // ADX < 20
+regime_trend = d_trending
+regime_range = d_ranging
 regime_neutral = not regime_trend and not regime_range
 
 regimeStr = regime_trend ? "TREND" : regime_range ? "RANGE" : "NEUTRAL"
 
 // ============================================================================
-// SECTION 8 -- POSITION SIZING & DRAWDOWN MANAGEMENT
+// SECTION 8 -- CONFLUENCE SCORING (0-5 points)
 // ============================================================================
 
-// Rolling 5-day equity drawdown
+// Each factor = 1 point. Need min_confluence to enter.
+longScore = (d_emaUptrend ? 1 : 0) +
+            (d_stBullish  ? 1 : 0) +
+            (momBull      ? 1 : 0) +
+            (stochBullCross ? 1 : 0) +
+            (volConfirm   ? 1 : 0)
+
+shortScore = (d_emaDowntrend ? 1 : 0) +
+             (d_stBearish   ? 1 : 0) +
+             (momBear       ? 1 : 0) +
+             (stochBearCross ? 1 : 0) +
+             (volConfirm    ? 1 : 0)
+
+// ============================================================================
+// SECTION 9 -- POSITION SIZING & DRAWDOWN MANAGEMENT
+// ============================================================================
+
 var float peakEquity5d = strategy.equity
 if ta.barssince(ta.change(time("D"))) == 0
     peakEquity5d := math.max(peakEquity5d, strategy.equity)
@@ -182,59 +222,73 @@ if ta.barssince(ta.change(time("D"))) == 0
 equityDD     = peakEquity5d > 0 ? (peakEquity5d - strategy.equity) / peakEquity5d * 100 : 0.0
 ddReduction  = equityDD > 5.0 ? 0.5 : 1.0
 
-// Risk 1% of equity, sized by ATR stop distance
-riskPerTrade = strategy.equity * 0.01 * ddReduction
+riskPerTrade = strategy.equity * (i_riskPct / 100) * ddReduction
 stopDist     = i_atrSlMul * atrVal
 qtyRisk      = stopDist > 0 ? riskPerTrade / stopDist : na
 
 // ============================================================================
-// SECTION 9 -- ENTRY CONDITIONS
+// SECTION 10 -- ENTRY CONDITIONS (Confluence + Mean-Reversion + Re-entry)
 // ============================================================================
 
-// --- LONG CONDITIONS ---
-// Trend-following mode (ADX > 25)
-trendLongSetup = h4_rsiCrossAbove30 or h4_macdBullCross
-trendLongOk    = d_emaUptrend and d_stBullish and regime_trend and trendLongSetup
+// --- TREND-FOLLOWING: confluence score >= threshold ---
+trendLongOk  = longScore >= i_minConfluence
+trendShortOk = shortScore >= i_minConfluence
 
-// Mean-reversion mode (ADX < 20) -- price near lower Bollinger Band
-revLongOk      = regime_range and d_emaUptrend and close <= bbLower * 1.005
-                 and (h4_rsiCrossAbove30 or h4_rsi < 35)
+// --- MEAN-REVERSION: BB touch + EMA alignment + volume ---
+revLongOk  = regime_range and d_emaUptrend and close <= bbLower * 1.005 and volConfirm
+revShortOk = regime_range and d_emaDowntrend and close >= bbUpper * 0.995 and volConfirm
 
-longEntry = (trendLongOk or revLongOk)
-             and stochBullCross
-             and volConfirm
+// --- TREND RE-ENTRY: pullback to fast EMA within established trend ---
+pullbackLong  = d_emaUptrend and d_stBullish and
+                close <= d_emaFast * 1.005 and
+                close >= d_emaFast - i_reentryATR * atrVal and
+                momBull and volConfirm
+
+pullbackShort = d_emaDowntrend and d_stBearish and
+                close >= d_emaFast * 0.995 and
+                close <= d_emaFast + i_reentryATR * atrVal and
+                momBear and volConfirm
+
+// --- COMBINED ENTRIES ---
+longEntry = (trendLongOk or revLongOk or pullbackLong)
              and sessionOk
              and strategy.opentrades < 3
 
-// --- SHORT CONDITIONS ---
-trendShortSetup = h4_rsiCrossBelow70 or h4_macdBearCross
-trendShortOk    = d_emaDowntrend and d_stBearish and regime_trend and trendShortSetup
-
-revShortOk      = regime_range and d_emaDowntrend and close >= bbUpper * 0.995
-                  and (h4_rsiCrossBelow70 or h4_rsi > 65)
-
-shortEntry = (trendShortOk or revShortOk)
-              and stochBearCross
-              and volConfirm
+shortEntry = (trendShortOk or revShortOk or pullbackShort)
               and sessionOk
               and strategy.opentrades < 3
 
 // ============================================================================
-// SECTION 10 -- TRADE EXECUTION
+// SECTION 11 -- TRADE EXECUTION (with partial profit taking)
 // ============================================================================
 
-// Calculate stop / take-profit / trail levels
 longSL   = close - i_atrSlMul * atrVal
 longTP   = close + i_atrTpMul * atrVal
 shortSL  = close + i_atrSlMul * atrVal
 shortTP  = close - i_atrTpMul * atrVal
 
-trailOffset  = 1.5 * atrVal
+// Partial TP levels
+longPartialTP  = close + i_partialTpMul * atrVal
+shortPartialTP = close - i_partialTpMul * atrVal
+
+// Trailing stop parameters
+trailOffset     = 1.5 * atrVal
 trailActivation = 1.5 * atrVal
+
+// Entry type label
+entryType = trendLongOk or trendShortOk ? "T" :
+            revLongOk or revShortOk ? "R" :
+            "P"  // Pullback
 
 if longEntry and not na(qtyRisk)
     strategy.entry("Long", strategy.long, qty = qtyRisk,
-                    comment = "L-" + regimeStr)
+                    comment = "L-" + entryType + "-" + regimeStr)
+    // Partial exit at first TP
+    strategy.exit("Long Partial", "Long",
+                   qty_percent = i_partialPct,
+                   limit    = longPartialTP,
+                   comment  = "L-Partial")
+    // Full exit with wider TP and trailing
     strategy.exit("Long TP/SL", "Long",
                    stop     = longSL,
                    limit    = longTP,
@@ -245,7 +299,11 @@ if longEntry and not na(qtyRisk)
 
 if shortEntry and not na(qtyRisk)
     strategy.entry("Short", strategy.short, qty = qtyRisk,
-                    comment = "S-" + regimeStr)
+                    comment = "S-" + entryType + "-" + regimeStr)
+    strategy.exit("Short Partial", "Short",
+                   qty_percent = i_partialPct,
+                   limit    = shortPartialTP,
+                   comment  = "S-Partial")
     strategy.exit("Short TP/SL", "Short",
                    stop     = shortSL,
                    limit    = shortTP,
@@ -255,10 +313,9 @@ if shortEntry and not na(qtyRisk)
                    comment_profit = "S-TP")
 
 // ============================================================================
-// SECTION 11 -- SUPERTREND FLIP EXIT (override)
+// SECTION 12 -- SUPERTREND FLIP EXIT (override)
 // ============================================================================
 
-// If daily supertrend flips against the position, close immediately.
 if d_stFlipBear and strategy.position_size > 0
     strategy.close("Long", comment = "ST-FlipExit")
 
@@ -266,48 +323,41 @@ if d_stFlipBull and strategy.position_size < 0
     strategy.close("Short", comment = "ST-FlipExit")
 
 // ============================================================================
-// SECTION 12 -- PLOTS & VISUAL OVERLAYS
+// SECTION 13 -- PLOTS & VISUAL OVERLAYS
 // ============================================================================
 
-// EMA ribbons (daily, projected onto chart)
 plot(d_emaFast, "Daily EMA Fast", color.new(color.teal, 30), 2)
 plot(d_emaSlow, "Daily EMA Slow", color.new(color.orange, 30), 2)
 
-// Supertrend line
 stColor = d_stBullish ? color.new(color.green, 20) : color.new(color.red, 20)
 plot(d_stLine_raw, "Daily Supertrend", stColor, 2, plot.style_stepline_diamond)
 
-// Bollinger Bands (shown only in range mode)
 bbColor = regime_range ? color.new(color.purple, 60) : na
 plot(regime_range ? bbUpper : na, "BB Upper", bbColor, 1)
 plot(regime_range ? bbLower : na, "BB Lower", bbColor, 1)
 
-// Entry markers
 plotshape(longEntry,  "Long Signal",  shape.triangleup,   location.belowbar, color.green, size = size.small)
 plotshape(shortEntry, "Short Signal", shape.triangledown,  location.abovebar, color.red,   size = size.small)
 
-// Background tint by regime
 bgcolor(regime_trend ? color.new(color.green, 95) :
         regime_range ? color.new(color.orange, 95) :
         color.new(color.gray, 97), title = "Regime BG")
 
 // ============================================================================
-// SECTION 13 -- DASHBOARD TABLE
+// SECTION 14 -- DASHBOARD TABLE
 // ============================================================================
 
-var table dash = table.new(position.top_right, 2, 6,
+var table dash = table.new(position.top_right, 2, 8,
                  bgcolor = color.new(color.black, 20),
                  border_width = 1,
                  border_color = color.gray,
                  frame_width  = 2,
                  frame_color  = color.white)
 
-// Win rate calculation
 totalTrades = strategy.closedtrades
 wins = strategy.wintrades
 winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0.0
 
-// Signal status string
 sigStatus = longEntry ? "LONG ENTRY" :
             shortEntry ? "SHORT ENTRY" :
             d_stFlipBear and strategy.position_size > 0 ? "LONG EXIT" :
@@ -319,40 +369,41 @@ sigColor = longEntry ? color.green :
            color.gray
 
 if barstate.islast
-    // Headers
     table.cell(dash, 0, 0, "Metric",     text_color = color.white, text_size = size.small, text_halign = text.align_left)
     table.cell(dash, 1, 0, "Value",      text_color = color.white, text_size = size.small, text_halign = text.align_right)
-    // Row 1 -- Regime
     table.cell(dash, 0, 1, "Regime",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
     table.cell(dash, 1, 1, regimeStr,    text_color = regime_trend ? color.green : regime_range ? color.orange : color.gray,
                text_size = size.small, text_halign = text.align_right)
-    // Row 2 -- Signal
     table.cell(dash, 0, 2, "Signal",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
     table.cell(dash, 1, 2, sigStatus,    text_color = sigColor, text_size = size.small, text_halign = text.align_right)
-    // Row 3 -- Open positions
-    table.cell(dash, 0, 3, "Positions",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 3, str.tostring(strategy.opentrades),
+    table.cell(dash, 0, 3, "Confluence", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 3, str.tostring(longEntry ? longScore : shortEntry ? shortScore : 0) + "/5",
                text_color = color.white, text_size = size.small, text_halign = text.align_right)
-    // Row 4 -- Equity drawdown
-    table.cell(dash, 0, 4, "Equity DD%", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 4, str.tostring(equityDD, "#.##") + "%",
+    table.cell(dash, 0, 4, "Positions",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 4, str.tostring(strategy.opentrades),
+               text_color = color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 5, "Equity DD%", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 5, str.tostring(equityDD, "#.##") + "%",
                text_color = equityDD > 5 ? color.red : equityDD > 2 ? color.orange : color.green,
                text_size = size.small, text_halign = text.align_right)
-    // Row 5 -- Win rate
-    table.cell(dash, 0, 5, "Win Rate",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 5, str.tostring(winRate, "#.#") + "% (" + str.tostring(totalTrades) + ")",
+    table.cell(dash, 0, 6, "Win Rate",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 6, str.tostring(winRate, "#.#") + "% (" + str.tostring(totalTrades) + ")",
                text_color = winRate >= 50 ? color.green : winRate >= 40 ? color.orange : color.red,
+               text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 7, "Net P&L",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 7, str.tostring(strategy.netprofit, "#.##"),
+               text_color = strategy.netprofit > 0 ? color.green : color.red,
                text_size = size.small, text_halign = text.align_right)
 
 // ============================================================================
-// SECTION 14 -- ALERT CONDITIONS
+// SECTION 15 -- ALERT CONDITIONS
 // ============================================================================
 
-alertcondition(longEntry,           title = "Long Entry",  message = "MTF Strategy: LONG entry  | {{ticker}} @ {{close}} | Regime: " + regimeStr)
-alertcondition(shortEntry,          title = "Short Entry", message = "MTF Strategy: SHORT entry | {{ticker}} @ {{close}} | Regime: " + regimeStr)
+alertcondition(longEntry,           title = "Long Entry",  message = "MTF Strategy v2: LONG entry  | {{ticker}} @ {{close}} | Confluence: " + str.tostring(longScore) + "/5 | Regime: " + regimeStr)
+alertcondition(shortEntry,          title = "Short Entry", message = "MTF Strategy v2: SHORT entry | {{ticker}} @ {{close}} | Confluence: " + str.tostring(shortScore) + "/5 | Regime: " + regimeStr)
 
 longExitCond  = d_stFlipBear and strategy.position_size > 0
 shortExitCond = d_stFlipBull and strategy.position_size < 0
 
-alertcondition(longExitCond,        title = "Long Exit",   message = "MTF Strategy: LONG exit (ST flip) | {{ticker}} @ {{close}}")
-alertcondition(shortExitCond,       title = "Short Exit",  message = "MTF Strategy: SHORT exit (ST flip) | {{ticker}} @ {{close}}")
+alertcondition(longExitCond,        title = "Long Exit",   message = "MTF Strategy v2: LONG exit (ST flip) | {{ticker}} @ {{close}}")
+alertcondition(shortExitCond,       title = "Short Exit",  message = "MTF Strategy v2: SHORT exit (ST flip) | {{ticker}} @ {{close}}")
