@@ -505,13 +505,13 @@ if barstate.islast
 // ============================================================================
 
 alertcondition(longCondition,  title = "Long Entry",
-     message = "5m Strategy: LONG | {{ticker}} @ {{close}} | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"))
+     message = "5m Strategy: LONG | {{ticker}} @ {{close}}")
 
 alertcondition(shortCondition, title = "Short Entry",
-     message = "5m Strategy: SHORT | {{ticker}} @ {{close}} | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"))
+     message = "5m Strategy: SHORT | {{ticker}} @ {{close}}")
 
 alertcondition(inCloseWindow and strategy.position_size != 0, title = "EOD Close",
      message = "5m Strategy: EOD Close | {{ticker}} @ {{close}}")
 
 alertcondition(not dailyLossOk, title = "Daily Loss Limit Hit",
-     message = "5m Strategy: Daily loss limit reached | {{ticker}} | P&L: " + str.tostring(dailyPnLPct, "#.##") + "%")
+     message = "5m Strategy: Daily loss limit reached | {{ticker}} @ {{close}}")
