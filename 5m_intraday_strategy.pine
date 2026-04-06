@@ -501,17 +501,24 @@ if barstate.islast
                text_size = size.small, text_halign = text.align_right)
 
 // ============================================================================
-// SECTION 9 -- ALERT CONDITIONS
+// SECTION 9 -- STRATEGY ALERTS (use alert() instead of alertcondition() in strategies)
 // ============================================================================
 
-alertcondition(longCondition,  title = "Long Entry",
-     message = "5m Strategy: LONG | {{ticker}} @ {{close}}")
+if longCondition
+    alert("5m Strategy: LONG | " + syminfo.ticker + " @ " + str.tostring(close) +
+          " | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"),
+          alert.freq_once_per_bar_close)
 
-alertcondition(shortCondition, title = "Short Entry",
-     message = "5m Strategy: SHORT | {{ticker}} @ {{close}}")
+if shortCondition
+    alert("5m Strategy: SHORT | " + syminfo.ticker + " @ " + str.tostring(close) +
+          " | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"),
+          alert.freq_once_per_bar_close)
 
-alertcondition(inCloseWindow and strategy.position_size != 0, title = "EOD Close",
-     message = "5m Strategy: EOD Close | {{ticker}} @ {{close}}")
+if inCloseWindow and strategy.position_size != 0
+    alert("5m Strategy: EOD Close | " + syminfo.ticker + " @ " + str.tostring(close),
+          alert.freq_once_per_bar_close)
 
-alertcondition(not dailyLossOk, title = "Daily Loss Limit Hit",
-     message = "5m Strategy: Daily loss limit reached | {{ticker}} @ {{close}}")
+if not dailyLossOk and dailyLossOk[1]
+    alert("5m Strategy: Daily loss limit reached | " + syminfo.ticker +
+          " | P&L: " + str.tostring(dailyPnLPct, "#.##") + "%",
+          alert.freq_once_per_bar_close)
