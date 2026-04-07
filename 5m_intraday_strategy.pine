@@ -3,7 +3,7 @@
 
 //@version=6
 strategy(
-     "5m Pullback Continuation v8",
+     "5m Pullback Continuation v9",
      overlay                 = true,
      commission_value        = 0.05,
      commission_type         = strategy.commission.percent,
@@ -46,10 +46,12 @@ i_volLen       = input.int(20,    "Volume SMA Length",   minval = 5,   maxval = 
 i_atrLen       = input.int(14,    "ATR Length",          minval = 5,   maxval = 30,   group = "ATR")
 
 // --- Pullback Entry ---
-i_pullbackBars = input.int(3,     "Pullback Lookback Bars", minval = 1, maxval = 10, group = "Pullback Entry",
-                 tooltip = "Number of bars to look back for pullback to EMA")
+i_pullbackBars = input.int(5,     "Pullback Lookback Bars", minval = 1, maxval = 10, group = "Pullback Entry",
+                 tooltip = "Number of bars to look back for pullback to SLOW EMA")
 i_requireBounce = input.bool(true, "Require Bounce Candle", group = "Pullback Entry",
                   tooltip = "Current bar must close above EMA fast for longs (below for shorts)")
+i_minBarsBetween = input.int(12,  "Min Bars Between Any Trade", minval = 3, maxval = 60, group = "Pullback Entry",
+                   tooltip = "Minimum spacing between trades to prevent overtrading")
 
 // --- Stop Loss ---
 i_slAtrMul    = input.float(2.0,  "SL ATR Multiple",     minval = 0.5, maxval = 5.0,  step = 0.25, group = "Stop Loss")
@@ -90,7 +92,7 @@ i_eodEndMinute     = input.int(0,   "EOD End Minute",       minval = 0, maxval =
 
 // --- Trade Limits ---
 i_useMaxTrades   = input.bool(true,  "Limit Trades Per Day", group = "Trade Limits")
-i_maxTrades      = input.int(6,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
+i_maxTrades      = input.int(3,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
 i_useDailyLoss   = input.bool(true,  "Use Daily Loss Limit", group = "Trade Limits")
 i_dailyLossPct   = input.float(2.0,  "Max Daily Loss %",     minval = 0.5, maxval = 10.0, step = 0.5, group = "Trade Limits")
 i_useCooldown    = input.bool(true,  "Use Cooldown After SL",  group = "Trade Limits")
@@ -137,32 +139,40 @@ htfBullish = close > htfEma
 htfBearish = close < htfEma
 
 // ============================================================================
-// SECTION 3 -- PULLBACK DETECTION
+// SECTION 3 -- PULLBACK DETECTION (to SLOW EMA, not fast)
 // ============================================================================
 
-// For longs: trend is up (EMA fast > slow), price pulled back to touch/cross EMA fast
-// within last N bars, and current bar bounces (closes above EMA fast)
-// This catches the RESUMPTION of trend, not the crossover start.
+// For longs: trend established (EMA fast > slow), price pulled back to
+// touch/cross the SLOW EMA within lookback window, and current bar
+// bounces back above FAST EMA. This is a deep, meaningful pullback.
 
-// Did price touch or dip below EMA fast in the lookback window?
+// Trend must be established: EMA(9) clearly above EMA(21)
+emaSpread     = emaFast - emaSlow
+emaSpreadPct  = emaSlow > 0 ? emaSpread / emaSlow * 100 : 0
+trendStrong   = math.abs(emaSpreadPct) > 0.02
+
+// Did price dip to or below SLOW EMA in the lookback window?
 longPullbackOccurred = false
 for i = 1 to i_pullbackBars
-    if low[i] <= emaFast[i]
+    if low[i] <= emaSlow[i]
         longPullbackOccurred := true
 
-// Did price touch or rise above EMA fast in the lookback window?
 shortPullbackOccurred = false
 for i = 1 to i_pullbackBars
-    if high[i] >= emaFast[i]
+    if high[i] >= emaSlow[i]
         shortPullbackOccurred := true
 
-// Bounce confirmation: current bar closes decisively in trend direction
-longBounce  = not i_requireBounce or (close > emaFast and close > open)
-shortBounce = not i_requireBounce or (close < emaFast and close < open)
+// Bounce: current bar closes above FAST EMA with bullish body
+longBounce  = not i_requireBounce or (close > emaFast and close > open and close > (high + low) / 2)
+shortBounce = not i_requireBounce or (close < emaFast and close < open and close < (high + low) / 2)
 
-// Pullback trigger
-pullbackLong  = emaBullish and longPullbackOccurred and longBounce
-pullbackShort = emaBearish and shortPullbackOccurred and shortBounce
+// RSI momentum: must be in favorable zone (not just "not extreme")
+rsiBiasLong  = rsiValue > 45 and rsiValue < i_rsiOB
+rsiBiasShort = rsiValue < 55 and rsiValue > i_rsiOS
+
+// Pullback trigger: deep pullback + bounce + trend strong
+pullbackLong  = emaBullish and trendStrong and longPullbackOccurred and longBounce and rsiBiasLong
+pullbackShort = emaBearish and trendStrong and shortPullbackOccurred and shortBounce and rsiBiasShort
 
 // ============================================================================
 // SECTION 4 -- FILTERS (kept minimal and fast)
@@ -227,6 +237,9 @@ equityDD = peakEquity > 0 ? (peakEquity - strategy.equity) / peakEquity * 100 : 
 inDrawdown = i_useEquityCurve and equityDD > i_ddThreshold
 sizeMult = inDrawdown ? (100.0 - i_ddReduction) / 100.0 : 1.0
 
+var int lastTradeBar = 0
+spacingOk = (bar_index - lastTradeBar) >= i_minBarsBetween
+
 // ============================================================================
 // SECTION 6 -- ENTRY CONDITIONS
 // ============================================================================
@@ -237,6 +250,7 @@ longCondition = i_enableLong
      and tradesAllowed
      and dailyLossOk
      and cooldownOk
+     and spacingOk
      and pullbackLong
      and vwapOkLong
      and htfOkLong
@@ -250,6 +264,7 @@ shortCondition = i_enableShort
      and tradesAllowed
      and dailyLossOk
      and cooldownOk
+     and spacingOk
      and pullbackShort
      and vwapOkShort
      and htfOkShort
@@ -288,6 +303,7 @@ if longCondition and canSizeTrade
     entryPrice := close
     entryBar   := bar_index
     entryATR   := atrValue
+    lastTradeBar := bar_index
     dailyTradeCount += 1
 
     sl = close - i_slAtrMul * atrValue
@@ -307,6 +323,7 @@ if shortCondition and canSizeTrade
     entryPrice := close
     entryBar   := bar_index
     entryATR   := atrValue
+    lastTradeBar := bar_index
     dailyTradeCount += 1
 
     sl = close + i_slAtrMul * atrValue
@@ -354,6 +371,7 @@ longBlocker = not inSession ? "OUT_SESSION" :
      not tradesAllowed ? "MAX_TRADES" :
      not dailyLossOk ? "DAILY_LOSS" :
      not cooldownOk ? "COOLDOWN" :
+     not spacingOk ? "SPACING" :
      not pullbackLong ? "NO_PULLBACK" :
      not vwapOkLong ? "BELOW_VWAP" :
      not htfOkLong ? "HTF_BEAR" :
@@ -367,6 +385,7 @@ shortBlocker = not inSession ? "OUT_SESSION" :
      not tradesAllowed ? "MAX_TRADES" :
      not dailyLossOk ? "DAILY_LOSS" :
      not cooldownOk ? "COOLDOWN" :
+     not spacingOk ? "SPACING" :
      not pullbackShort ? "NO_PULLBACK" :
      not vwapOkShort ? "ABOVE_VWAP" :
      not htfOkShort ? "HTF_BULL" :
