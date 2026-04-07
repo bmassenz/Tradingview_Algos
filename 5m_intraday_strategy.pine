@@ -3,7 +3,7 @@
 
 //@version=6
 strategy(
-     "5m Pullback Continuation v9",
+     "5m Pullback Continuation v10",
      overlay                 = true,
      commission_value        = 0.05,
      commission_type         = strategy.commission.percent,
@@ -23,7 +23,7 @@ strategy(
 // ============================================================================
 
 i_enableLong  = input.bool(true,  "Enable Long Trades",  group = "Direction")
-i_enableShort = input.bool(true,  "Enable Short Trades", group = "Direction")
+i_enableShort = input.bool(false, "Enable Short Trades", group = "Direction")
 
 // --- EMA ---
 i_emaFastLen  = input.int(9,      "EMA Fast Length",     minval = 3,   maxval = 50,   group = "EMA")
@@ -39,7 +39,7 @@ i_rsiOS       = input.int(25,     "RSI Oversold",        minval = 10,  maxval = 
 
 // --- Volume ---
 i_useVolFilter = input.bool(true, "Use Volume Filter",   group = "Volume")
-i_volMultiple  = input.float(0.8, "Volume SMA Multiple", minval = 0.3, maxval = 3.0, step = 0.1, group = "Volume")
+i_volMultiple  = input.float(1.5, "Volume SMA Multiple", minval = 0.3, maxval = 3.0, step = 0.1, group = "Volume")
 i_volLen       = input.int(20,    "Volume SMA Length",   minval = 5,   maxval = 50,   group = "Volume")
 
 // --- ATR ---
@@ -50,17 +50,17 @@ i_pullbackBars = input.int(5,     "Pullback Lookback Bars", minval = 1, maxval =
                  tooltip = "Number of bars to look back for pullback to SLOW EMA")
 i_requireBounce = input.bool(true, "Require Bounce Candle", group = "Pullback Entry",
                   tooltip = "Current bar must close above EMA fast for longs (below for shorts)")
-i_minBarsBetween = input.int(12,  "Min Bars Between Any Trade", minval = 3, maxval = 60, group = "Pullback Entry",
+i_minBarsBetween = input.int(60,  "Min Bars Between Any Trade", minval = 3, maxval = 200, group = "Pullback Entry",
                    tooltip = "Minimum spacing between trades to prevent overtrading")
 
 // --- Stop Loss ---
-i_slAtrMul    = input.float(2.0,  "SL ATR Multiple",     minval = 0.5, maxval = 5.0,  step = 0.25, group = "Stop Loss")
+i_slAtrMul    = input.float(2.5,  "SL ATR Multiple",     minval = 0.5, maxval = 5.0,  step = 0.25, group = "Stop Loss")
 
 // --- Take Profit ---
-i_tpAtrMul    = input.float(3.0,  "TP ATR Multiple",     minval = 1.0, maxval = 10.0, step = 0.25, group = "Take Profit")
+i_tpAtrMul    = input.float(4.0,  "TP ATR Multiple",     minval = 1.0, maxval = 10.0, step = 0.25, group = "Take Profit")
 
 // --- Trailing Stop ---
-i_useTrail    = input.bool(true,  "Use Trailing Stop",  group = "Trailing Stop")
+i_useTrail    = input.bool(false, "Use Trailing Stop",  group = "Trailing Stop")
 i_trailAtrMul = input.float(1.5,  "Trail ATR Multiple", minval = 0.5, maxval = 5.0,  step = 0.25, group = "Trailing Stop")
 i_trailActMul = input.float(1.5,  "Trail Activation ATR Multiple", minval = 0.5, maxval = 5.0, step = 0.25, group = "Trailing Stop")
 
@@ -80,10 +80,10 @@ i_maxQtyDollar = input.float(50000, "Max Position Dollar Cap", minval = 5000, ma
 // --- Session ---
 i_useSession       = input.bool(true,  "Use Session Filter", group = "Session")
 i_sessionTZ        = input.string("America/New_York", "Session Time Zone", options = ["America/New_York"], group = "Session")
-i_sessStartHour    = input.int(9,   "Session Start Hour",   minval = 0, maxval = 23, group = "Session")
-i_sessStartMinute  = input.int(35,  "Session Start Minute", minval = 0, maxval = 59, group = "Session")
-i_sessEndHour      = input.int(15,  "Session End Hour",     minval = 0, maxval = 23, group = "Session")
-i_sessEndMinute    = input.int(55,  "Session End Minute",   minval = 0, maxval = 59, group = "Session")
+i_sessStartHour    = input.int(10,  "Session Start Hour",   minval = 0, maxval = 23, group = "Session")
+i_sessStartMinute  = input.int(0,   "Session Start Minute", minval = 0, maxval = 59, group = "Session")
+i_sessEndHour      = input.int(14,  "Session End Hour",     minval = 0, maxval = 23, group = "Session")
+i_sessEndMinute    = input.int(0,   "Session End Minute",   minval = 0, maxval = 59, group = "Session")
 i_closeEOD         = input.bool(true,  "Close All at Session End", group = "Session")
 i_eodStartHour     = input.int(15,  "EOD Start Hour",       minval = 0, maxval = 23, group = "Session")
 i_eodStartMinute   = input.int(55,  "EOD Start Minute",     minval = 0, maxval = 59, group = "Session")
@@ -92,7 +92,7 @@ i_eodEndMinute     = input.int(0,   "EOD End Minute",       minval = 0, maxval =
 
 // --- Trade Limits ---
 i_useMaxTrades   = input.bool(true,  "Limit Trades Per Day", group = "Trade Limits")
-i_maxTrades      = input.int(3,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
+i_maxTrades      = input.int(1,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
 i_useDailyLoss   = input.bool(true,  "Use Daily Loss Limit", group = "Trade Limits")
 i_dailyLossPct   = input.float(2.0,  "Max Daily Loss %",     minval = 0.5, maxval = 10.0, step = 0.5, group = "Trade Limits")
 i_useCooldown    = input.bool(true,  "Use Cooldown After SL",  group = "Trade Limits")
@@ -139,40 +139,45 @@ htfBullish = close > htfEma
 htfBearish = close < htfEma
 
 // ============================================================================
-// SECTION 3 -- PULLBACK DETECTION (to SLOW EMA, not fast)
+// SECTION 3 -- PULLBACK DETECTION (deep pullback to SLOW EMA with strong bounce)
 // ============================================================================
-
-// For longs: trend established (EMA fast > slow), price pulled back to
-// touch/cross the SLOW EMA within lookback window, and current bar
-// bounces back above FAST EMA. This is a deep, meaningful pullback.
 
 // Trend must be established: EMA(9) clearly above EMA(21)
 emaSpread     = emaFast - emaSlow
 emaSpreadPct  = emaSlow > 0 ? emaSpread / emaSlow * 100 : 0
-trendStrong   = math.abs(emaSpreadPct) > 0.02
+trendStrong   = math.abs(emaSpreadPct) > 0.03
 
-// Did price dip to or below SLOW EMA in the lookback window?
+// Minimum volatility: ATR must be > 0.3% of price (avoid dead chop)
+atrPct       = close > 0 ? atrValue / close * 100 : 0
+volEnough    = atrPct > 0.3
+
+// Did price CLOSE below SLOW EMA in the lookback window? (deeper than just low touching)
 longPullbackOccurred = false
 for i = 1 to i_pullbackBars
-    if low[i] <= emaSlow[i]
+    if close[i] <= emaSlow[i]
         longPullbackOccurred := true
 
 shortPullbackOccurred = false
 for i = 1 to i_pullbackBars
-    if high[i] >= emaSlow[i]
+    if close[i] >= emaSlow[i]
         shortPullbackOccurred := true
 
-// Bounce: current bar closes above FAST EMA with bullish body
-longBounce  = not i_requireBounce or (close > emaFast and close > open and close > (high + low) / 2)
-shortBounce = not i_requireBounce or (close < emaFast and close < open and close < (high + low) / 2)
+// Strong bounce: close above fast EMA, bullish body > 60% of range, range > 0.5 ATR
+candleRange  = high - low
+candleBody   = math.abs(close - open)
+bodyRatio    = candleRange > 0 ? candleBody / candleRange : 0
+rangeVsATR   = atrValue > 0 ? candleRange / atrValue : 0
 
-// RSI momentum: must be in favorable zone (not just "not extreme")
+longBounce  = close > emaFast and close > open and bodyRatio > 0.6 and rangeVsATR > 0.5
+shortBounce = close < emaFast and close < open and bodyRatio > 0.6 and rangeVsATR > 0.5
+
+// RSI momentum: must be in favorable zone
 rsiBiasLong  = rsiValue > 45 and rsiValue < i_rsiOB
 rsiBiasShort = rsiValue < 55 and rsiValue > i_rsiOS
 
-// Pullback trigger: deep pullback + bounce + trend strong
-pullbackLong  = emaBullish and trendStrong and longPullbackOccurred and longBounce and rsiBiasLong
-pullbackShort = emaBearish and trendStrong and shortPullbackOccurred and shortBounce and rsiBiasShort
+// Pullback trigger: deep pullback + strong bounce + strong trend + enough volatility
+pullbackLong  = emaBullish and trendStrong and volEnough and longPullbackOccurred and longBounce and rsiBiasLong
+pullbackShort = emaBearish and trendStrong and volEnough and shortPullbackOccurred and shortBounce and rsiBiasShort
 
 // ============================================================================
 // SECTION 4 -- FILTERS (kept minimal and fast)
@@ -568,10 +573,10 @@ if barstate.isconfirmed and i_showBacktester
 // ============================================================================
 
 if longCondition and canSizeTrade
-    alert("v8 PB: LONG | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
+    alert("v10 PB: LONG | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
 
 if shortCondition and canSizeTrade
-    alert("v8 PB: SHORT | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
+    alert("v10 PB: SHORT | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
 
 if inCloseWindow and strategy.position_size != 0
-    alert("v8 PB: EOD Close | " + syminfo.ticker, alert.freq_once_per_bar_close)
+    alert("v10 PB: EOD Close | " + syminfo.ticker, alert.freq_once_per_bar_close)
