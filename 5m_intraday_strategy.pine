@@ -3,7 +3,7 @@
 
 //@version=6
 strategy(
-     "5m Adaptive Intraday Strategy v7",
+     "5m Pullback Continuation v8",
      overlay                 = true,
      commission_value        = 0.05,
      commission_type         = strategy.commission.percent,
@@ -22,68 +22,58 @@ strategy(
 // SECTION 1 -- INPUTS
 // ============================================================================
 
-// --- Direction ---
 i_enableLong  = input.bool(true,  "Enable Long Trades",  group = "Direction")
 i_enableShort = input.bool(true,  "Enable Short Trades", group = "Direction")
 
 // --- EMA ---
 i_emaFastLen  = input.int(9,      "EMA Fast Length",     minval = 3,   maxval = 50,   group = "EMA")
 i_emaSlowLen  = input.int(21,     "EMA Slow Length",     minval = 10,  maxval = 100,  group = "EMA")
-i_emaTrendLen = input.int(50,     "EMA Trend Length",    minval = 20,  maxval = 200,  group = "EMA")
 
 // --- VWAP ---
-i_useVwap               = input.bool(true,  "Use VWAP Filter", group = "VWAP")
-i_useVwapBands          = input.bool(true,  "Use VWAP Bands", group = "VWAP")
-i_vwapBandLen           = input.int(20,     "VWAP Band Length", minval = 5, maxval = 100, group = "VWAP")
-i_vwapBandMult          = input.float(1.0,  "VWAP Band StDev Mult", minval = 0.25, maxval = 3.0, step = 0.25, group = "VWAP")
-i_useVwapExtensionBlock = input.bool(true,  "Block >2sig VWAP Extensions", group = "VWAP")
-
-// --- MACD ---
-i_macdFast    = input.int(5,      "MACD Fast",           minval = 2,   maxval = 20,   group = "MACD")
-i_macdSlow    = input.int(13,     "MACD Slow",           minval = 5,   maxval = 50,   group = "MACD")
-i_macdSignal  = input.int(3,      "MACD Signal",         minval = 1,   maxval = 15,   group = "MACD")
+i_useVwap     = input.bool(true,  "Use VWAP Trend Filter", group = "VWAP")
 
 // --- RSI ---
 i_rsiLen      = input.int(10,     "RSI Length",          minval = 2,   maxval = 30,   group = "RSI")
-i_rsiOB       = input.int(70,     "RSI Overbought",      minval = 60,  maxval = 90,   group = "RSI")
-i_rsiOS       = input.int(30,     "RSI Oversold",        minval = 10,  maxval = 40,   group = "RSI")
+i_rsiOB       = input.int(75,     "RSI Overbought",      minval = 60,  maxval = 90,   group = "RSI")
+i_rsiOS       = input.int(25,     "RSI Oversold",        minval = 10,  maxval = 40,   group = "RSI")
 
 // --- Volume ---
 i_useVolFilter = input.bool(true, "Use Volume Filter",   group = "Volume")
 i_volMultiple  = input.float(0.8, "Volume SMA Multiple", minval = 0.3, maxval = 3.0, step = 0.1, group = "Volume")
 i_volLen       = input.int(20,    "Volume SMA Length",   minval = 5,   maxval = 50,   group = "Volume")
 
-// --- ATR / Volatility ---
-i_atrLen       = input.int(14,    "ATR Length",          minval = 5,   maxval = 30,   group = "Volatility")
-i_useVolatilityFilter = input.bool(true, "Block Extreme Volatility", group = "Volatility")
-i_atrHighMul   = input.float(2.5, "ATR Extreme Multiple", minval = 1.5, maxval = 4.0, step = 0.5, group = "Volatility")
+// --- ATR ---
+i_atrLen       = input.int(14,    "ATR Length",          minval = 5,   maxval = 30,   group = "ATR")
 
-// --- Confluence Scoring ---
-i_minScore    = input.int(4,      "Min Confluence Score (of 9)", minval = 2, maxval = 9, group = "Confluence",
-                tooltip = "Min points: EMA trend, VWAP, HTF 60m, HTF 15m, RSI bias, MACD hist, ADX, Volume, Supertrend")
-
-// --- Signal Persistence ---
-i_persistBars = input.int(3,      "Signal Persistence (bars)", minval = 1, maxval = 8, group = "Signal")
+// --- Pullback Entry ---
+i_pullbackBars = input.int(3,     "Pullback Lookback Bars", minval = 1, maxval = 10, group = "Pullback Entry",
+                 tooltip = "Number of bars to look back for pullback to EMA")
+i_requireBounce = input.bool(true, "Require Bounce Candle", group = "Pullback Entry",
+                  tooltip = "Current bar must close above EMA fast for longs (below for shorts)")
 
 // --- Stop Loss ---
-i_slAtrMul    = input.float(1.5,  "SL ATR Multiple",     minval = 0.5, maxval = 5.0,  step = 0.25, group = "Stop Loss")
+i_slAtrMul    = input.float(2.0,  "SL ATR Multiple",     minval = 0.5, maxval = 5.0,  step = 0.25, group = "Stop Loss")
 
 // --- Take Profit ---
 i_tpAtrMul    = input.float(3.0,  "TP ATR Multiple",     minval = 1.0, maxval = 10.0, step = 0.25, group = "Take Profit")
 
-// --- Partial Profit ---
-i_usePartial    = input.bool(true,  "Use Partial Profit Taking", group = "Partial TP")
-i_partialMul    = input.float(1.5,  "Partial TP ATR Multiple",   minval = 0.5, maxval = 3.0, step = 0.25, group = "Partial TP")
-i_partialPct    = input.float(50,   "Partial Close %",           minval = 25,  maxval = 75,  step = 25,   group = "Partial TP")
-
 // --- Trailing Stop ---
 i_useTrail    = input.bool(true,  "Use Trailing Stop",  group = "Trailing Stop")
-i_trailAtrMul = input.float(0.75, "Trail ATR Multiple", minval = 0.25, maxval = 5.0, step = 0.25, group = "Trailing Stop")
-i_trailActMul = input.float(1.0,  "Trail Activation ATR Multiple", minval = 0.5, maxval = 5.0, step = 0.25, group = "Trailing Stop")
+i_trailAtrMul = input.float(1.5,  "Trail ATR Multiple", minval = 0.5, maxval = 5.0,  step = 0.25, group = "Trailing Stop")
+i_trailActMul = input.float(1.5,  "Trail Activation ATR Multiple", minval = 0.5, maxval = 5.0, step = 0.25, group = "Trailing Stop")
 
 // --- Stale Trade Exit ---
 i_useStaleExit = input.bool(true, "Use Stale Trade Exit", group = "Stale Exit")
-i_staleBars    = input.int(20,    "Close After N Bars if < 0.5 ATR Profit", minval = 5, maxval = 60, group = "Stale Exit")
+i_staleBars    = input.int(30,    "Close After N Bars if < 0.5 ATR Profit", minval = 5, maxval = 60, group = "Stale Exit")
+
+// --- Position Sizing ---
+i_qtyMode     = input.string("Fixed Dollar", "Position Size Mode",
+                options = ["Fixed Dollar", "Risk Percent"], group = "Position Sizing")
+i_fixedDollar = input.float(20000, "Fixed Dollar Amount", minval = 1000, maxval = 500000, step = 1000, group = "Position Sizing",
+                tooltip = "Max dollar value per trade (caps commission impact)")
+i_riskPct     = input.float(1.0,  "Risk % Per Trade (Risk Mode)", minval = 0.25, maxval = 3.0, step = 0.25, group = "Position Sizing")
+i_maxQtyDollar = input.float(50000, "Max Position Dollar Cap", minval = 5000, maxval = 500000, step = 5000, group = "Position Sizing",
+                 tooltip = "Hard cap on position size regardless of mode")
 
 // --- Session ---
 i_useSession       = input.bool(true,  "Use Session Filter", group = "Session")
@@ -97,93 +87,42 @@ i_eodStartHour     = input.int(15,  "EOD Start Hour",       minval = 0, maxval =
 i_eodStartMinute   = input.int(55,  "EOD Start Minute",     minval = 0, maxval = 59, group = "Session")
 i_eodEndHour       = input.int(16,  "EOD End Hour",         minval = 0, maxval = 23, group = "Session")
 i_eodEndMinute     = input.int(0,   "EOD End Minute",       minval = 0, maxval = 59, group = "Session")
-i_useMiddayPenalty = input.bool(true,  "Raise Score During Midday", group = "Session")
-i_middayPenalty    = input.int(1,      "Midday Score Penalty", minval = 0, maxval = 3, group = "Session")
-i_middayStartHour  = input.int(12,  "Midday Start Hour",    minval = 0, maxval = 23, group = "Session")
-i_middayStartMinute= input.int(0,   "Midday Start Minute",  minval = 0, maxval = 59, group = "Session")
-i_middayEndHour    = input.int(13,  "Midday End Hour",      minval = 0, maxval = 23, group = "Session")
-i_middayEndMinute  = input.int(30,  "Midday End Minute",    minval = 0, maxval = 59, group = "Session")
 
 // --- Trade Limits ---
 i_useMaxTrades   = input.bool(true,  "Limit Trades Per Day", group = "Trade Limits")
-i_maxTrades      = input.int(8,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
+i_maxTrades      = input.int(6,      "Max Trades Per Day",   minval = 1, maxval = 20, group = "Trade Limits")
 i_useDailyLoss   = input.bool(true,  "Use Daily Loss Limit", group = "Trade Limits")
 i_dailyLossPct   = input.float(2.0,  "Max Daily Loss %",     minval = 0.5, maxval = 10.0, step = 0.5, group = "Trade Limits")
-i_useDailyProfit = input.bool(true,  "Use Daily Profit Target", group = "Trade Limits")
-i_dailyProfitPct = input.float(3.0,  "Max Daily Profit %",     minval = 1.0, maxval = 10.0, step = 0.5, group = "Trade Limits")
-
-// --- Cooldown ---
-i_useCooldown  = input.bool(true,  "Use Cooldown After SL",  group = "Trade Limits")
-i_cooldownBars = input.int(4,      "Cooldown Bars After SL", minval = 1, maxval = 20, group = "Trade Limits")
+i_useCooldown    = input.bool(true,  "Use Cooldown After SL",  group = "Trade Limits")
+i_cooldownBars   = input.int(6,      "Cooldown Bars After SL", minval = 1, maxval = 30, group = "Trade Limits")
 
 // --- HTF Filter ---
-i_useHTF          = input.bool(true,  "Use 60m HTF Trend Filter",  group = "HTF Filter")
-i_htfTF           = input.timeframe("60", "Higher Timeframe",      group = "HTF Filter")
-i_htfEmaLen       = input.int(21,     "HTF EMA Length",             minval = 5, maxval = 100, group = "HTF Filter")
-i_useHTFMid       = input.bool(true,  "Use 15m Mid HTF Filter",    group = "HTF Filter")
-i_htfMidTF        = input.timeframe("15", "Mid Timeframe",        group = "HTF Filter")
-i_htfMidEmaLen    = input.int(21,     "Mid HTF EMA Length",         minval = 5, maxval = 100, group = "HTF Filter")
+i_useHTF       = input.bool(true,  "Use 60m HTF Trend Filter",  group = "HTF Filter")
+i_htfTF        = input.timeframe("60", "Higher Timeframe",      group = "HTF Filter")
+i_htfEmaLen    = input.int(21,     "HTF EMA Length",             minval = 5, maxval = 100, group = "HTF Filter")
 
-// --- ADX ---
-i_adxLen       = input.int(14,     "ADX Length",             minval = 5,  maxval = 30,  group = "ADX")
-i_adxThresh    = input.int(18,     "ADX Trending Threshold", minval = 10, maxval = 40,  group = "ADX")
-
-// --- Supertrend ---
-i_useSuper     = input.bool(true,  "Use Supertrend Score Factor", group = "Supertrend")
-i_stAtrLen     = input.int(10,     "Supertrend ATR Length", minval = 5, maxval = 30, group = "Supertrend")
-i_stFactor     = input.float(3.0,  "Supertrend Factor", minval = 1.0, maxval = 6.0, step = 0.25, group = "Supertrend")
-
-// --- Regime Adaptation ---
-i_useRegimeAdapt = input.bool(true, "Adapt SL/TP to Regime", group = "Regime",
-                   tooltip = "Widen targets in trends, tighten in ranges")
-i_trendSlBonus   = input.float(0.5, "Trend SL Bonus ATR",   minval = 0, maxval = 2.0, step = 0.25, group = "Regime")
-i_trendTpBonus   = input.float(1.0, "Trend TP Bonus ATR",   minval = 0, maxval = 3.0, step = 0.25, group = "Regime")
-
-// --- Risk ---
-i_riskPct         = input.float(1.0, "Risk % Per Trade", minval = 0.25, maxval = 3.0, step = 0.25, group = "Risk")
+// --- Drawdown Management ---
 i_useEquityCurve  = input.bool(true,  "Reduce Size in Drawdown", group = "Risk")
-i_ddTier1         = input.float(3.0,  "DD Tier 1 %", minval = 1, maxval = 10, step = 0.5, group = "Risk")
-i_ddTier2         = input.float(7.0,  "DD Tier 2 %", minval = 2, maxval = 15, step = 0.5, group = "Risk")
-i_ddTier3         = input.float(12.0, "DD Tier 3 %", minval = 3, maxval = 25, step = 0.5, group = "Risk")
-i_ddSuspend       = input.float(18.0, "Suspend Trading DD %", minval = 5, maxval = 40, step = 0.5, group = "Risk")
+i_ddThreshold     = input.float(8.0,  "Drawdown Threshold %", minval = 2, maxval = 20, step = 1, group = "Risk")
+i_ddReduction     = input.float(50,   "Size Reduction %",     minval = 10, maxval = 90, step = 10, group = "Risk")
 
 // --- Display ---
 i_showDebug      = input.bool(true, "Show Debug Panel", group = "Display")
 i_showBacktester = input.bool(true, "Show Backtester Panel", group = "Display")
 
 // ============================================================================
-// SECTION 2 -- INDICATORS
+// SECTION 2 -- INDICATORS (minimal, fast)
 // ============================================================================
 
 emaFast  = ta.ema(close, i_emaFastLen)
 emaSlow  = ta.ema(close, i_emaSlowLen)
-emaTrend = ta.ema(close, i_emaTrendLen)
 
 emaBullish = emaFast > emaSlow
 emaBearish = emaFast < emaSlow
-emaCrossUp   = ta.crossover(emaFast, emaSlow)
-emaCrossDown = ta.crossunder(emaFast, emaSlow)
 
-vwapValue  = ta.vwap(hlc3)
-vwapDev    = ta.stdev(hlc3, i_vwapBandLen) * i_vwapBandMult
-vwapUpper1 = vwapValue + vwapDev
-vwapLower1 = vwapValue - vwapDev
-vwapUpper2 = vwapValue + 2.0 * vwapDev
-vwapLower2 = vwapValue - 2.0 * vwapDev
-aboveVwap  = close > vwapValue
-belowVwap  = close < vwapValue
-aboveVwap1 = close > vwapUpper1
-belowVwap1 = close < vwapLower1
-vwapExtensionOkLong  = not i_useVwapExtensionBlock or close <= vwapUpper2
-vwapExtensionOkShort = not i_useVwapExtensionBlock or close >= vwapLower2
-
-[macdLine, macdSignalLine, macdHist] = ta.macd(close, i_macdFast, i_macdSlow, i_macdSignal)
-macdBullish = macdLine > macdSignalLine
-macdBearish = macdLine < macdSignalLine
-macdCrossUp   = ta.crossover(macdLine, macdSignalLine)
-macdCrossDown = ta.crossunder(macdLine, macdSignalLine)
-macdHistRising  = macdHist > macdHist[1]
-macdHistFalling = macdHist < macdHist[1]
+vwapValue = ta.vwap(hlc3)
+aboveVwap = close > vwapValue
+belowVwap = close < vwapValue
 
 rsiValue = ta.rsi(close, i_rsiLen)
 
@@ -191,106 +130,73 @@ volSma      = ta.sma(volume, i_volLen)
 volAboveAvg = volume >= volSma * i_volMultiple
 
 atrValue = ta.atr(i_atrLen)
-atrSma   = ta.sma(atrValue, 50)
-volatilityOk = not i_useVolatilityFilter or atrValue < atrSma * i_atrHighMul
 
-adx_calc(len) =>
-    up   = ta.change(high)
-    down = -ta.change(low)
-    plusDM  = na(up)   ? na : (up > down and up > 0   ? up   : 0)
-    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
-    trueRange = ta.rma(ta.tr, len)
-    plus  = 100 * ta.rma(plusDM, len)  / trueRange
-    minus = 100 * ta.rma(minusDM, len) / trueRange
-    dx = 100 * math.abs(plus - minus) / (plus + minus)
-    ta.rma(dx, len)
-
-adxValue   = adx_calc(i_adxLen)
-isTrending = adxValue > i_adxThresh
-
-htfEma = i_useHTF ? request.security(syminfo.tickerid, i_htfTF, ta.ema(close, i_htfEmaLen), lookahead = barmerge.lookahead_off) : emaTrend
+htfEma = i_useHTF ? request.security(syminfo.tickerid, i_htfTF, ta.ema(close, i_htfEmaLen),
+         lookahead = barmerge.lookahead_off) : emaSlow
 htfBullish = close > htfEma
 htfBearish = close < htfEma
 
-htfMidEma = i_useHTFMid ? request.security(syminfo.tickerid, i_htfMidTF, ta.ema(close, i_htfMidEmaLen), lookahead = barmerge.lookahead_off) : emaSlow
-htfMidBullish = close > htfMidEma
-htfMidBearish = close < htfMidEma
-
-[superLine, superDir] = ta.supertrend(i_stFactor, i_stAtrLen)
-stBullish = superDir < 0
-stBearish = superDir > 0
-
 // ============================================================================
-// SECTION 3 -- SIGNAL PERSISTENCE
+// SECTION 3 -- PULLBACK DETECTION
 // ============================================================================
 
-var int macdBullAge = 999
-var int macdBearAge = 999
-var int emaBullAge  = 999
-var int emaBearAge  = 999
+// For longs: trend is up (EMA fast > slow), price pulled back to touch/cross EMA fast
+// within last N bars, and current bar bounces (closes above EMA fast)
+// This catches the RESUMPTION of trend, not the crossover start.
 
-macdBullAge := macdCrossUp   ? 0 : macdBullAge + 1
-macdBearAge := macdCrossDown ? 0 : macdBearAge + 1
-emaBullAge  := emaCrossUp    ? 0 : emaBullAge + 1
-emaBearAge  := emaCrossDown  ? 0 : emaBearAge + 1
+// Did price touch or dip below EMA fast in the lookback window?
+longPullbackOccurred = false
+for i = 1 to i_pullbackBars
+    if low[i] <= emaFast[i]
+        longPullbackOccurred := true
 
-macdBullPersist = macdBullAge <= i_persistBars and macdBullish
-macdBearPersist = macdBearAge <= i_persistBars and macdBearish
-emaBullPersist  = emaBullAge  <= i_persistBars and emaBullish
-emaBearPersist  = emaBearAge  <= i_persistBars and emaBearish
+// Did price touch or rise above EMA fast in the lookback window?
+shortPullbackOccurred = false
+for i = 1 to i_pullbackBars
+    if high[i] >= emaFast[i]
+        shortPullbackOccurred := true
 
-triggerLong  = (macdBullPersist and emaBullish) or (emaBullPersist and macdBullish)
-triggerShort = (macdBearPersist and emaBearish) or (emaBearPersist and macdBearish)
+// Bounce confirmation: current bar closes decisively in trend direction
+longBounce  = not i_requireBounce or (close > emaFast and close > open)
+shortBounce = not i_requireBounce or (close < emaFast and close < open)
+
+// Pullback trigger
+pullbackLong  = emaBullish and longPullbackOccurred and longBounce
+pullbackShort = emaBearish and shortPullbackOccurred and shortBounce
 
 // ============================================================================
-// SECTION 4 -- CONFLUENCE SCORING
+// SECTION 4 -- FILTERS (kept minimal and fast)
 // ============================================================================
 
-longScore =
-     (close > emaTrend  ? 1 : 0) +
-     ((not i_useVwap or aboveVwap) ? 1 : 0) +
-     ((not i_useHTF or htfBullish) ? 1 : 0) +
-     ((not i_useHTFMid or htfMidBullish) ? 1 : 0) +
-     (rsiValue > 50     ? 1 : 0) +
-     (macdHistRising    ? 1 : 0) +
-     (isTrending        ? 1 : 0) +
-     ((not i_useVolFilter or volAboveAvg) ? 1 : 0) +
-     ((not i_useSuper or stBullish) ? 1 : 0)
+// VWAP alignment
+vwapOkLong  = not i_useVwap or aboveVwap
+vwapOkShort = not i_useVwap or belowVwap
 
-shortScore =
-     (close < emaTrend  ? 1 : 0) +
-     ((not i_useVwap or belowVwap) ? 1 : 0) +
-     ((not i_useHTF or htfBearish) ? 1 : 0) +
-     ((not i_useHTFMid or htfMidBearish) ? 1 : 0) +
-     (rsiValue < 50     ? 1 : 0) +
-     (macdHistFalling   ? 1 : 0) +
-     (isTrending        ? 1 : 0) +
-     ((not i_useVolFilter or volAboveAvg) ? 1 : 0) +
-     ((not i_useSuper or stBearish) ? 1 : 0)
+// HTF alignment
+htfOkLong  = not i_useHTF or htfBullish
+htfOkShort = not i_useHTF or htfBearish
 
-// Session time calculations
+// RSI not extreme
+rsiOkLong  = rsiValue < i_rsiOB
+rsiOkShort = rsiValue > i_rsiOS
+
+// Volume
+volumeOk = not i_useVolFilter or volAboveAvg
+
+// ============================================================================
+// SECTION 5 -- SESSION & RISK GATES
+// ============================================================================
+
 nyHour      = hour(time, i_sessionTZ)
 nyMinute    = minute(time, i_sessionTZ)
 nyDay       = dayofweek(time, i_sessionTZ)
 nyMinuteDay = nyHour * 60 + nyMinute
+isWeekday   = nyDay >= dayofweek.monday and nyDay <= dayofweek.friday
 
 sessionStartMin = i_sessStartHour * 60 + i_sessStartMinute
 sessionEndMin   = i_sessEndHour * 60 + i_sessEndMinute
 eodStartMin     = i_eodStartHour * 60 + i_eodStartMinute
 eodEndMin       = i_eodEndHour * 60 + i_eodEndMinute
-middayStartMin  = i_middayStartHour * 60 + i_middayStartMinute
-middayEndMin    = i_middayEndHour * 60 + i_middayEndMinute
-isWeekday       = nyDay >= dayofweek.monday and nyDay <= dayofweek.friday
-
-inMidday      = isWeekday and nyMinuteDay >= middayStartMin and nyMinuteDay < middayEndMin
-scoreNeed     = i_minScore + (i_useMiddayPenalty and inMidday ? i_middayPenalty : 0)
-
-confluenceLong  = longScore  >= scoreNeed
-confluenceShort = shortScore >= scoreNeed
-
-// ============================================================================
-// SECTION 5 -- SESSION & RISK GATES
-// ============================================================================
 
 inSession     = not i_useSession or (isWeekday and nyMinuteDay >= sessionStartMin and nyMinuteDay < sessionEndMin)
 inCloseWindow = i_closeEOD and isWeekday and nyMinuteDay >= eodStartMin and nyMinuteDay < eodEndMin
@@ -304,11 +210,9 @@ tradesAllowed = not i_useMaxTrades or dailyTradeCount < i_maxTrades
 var float dayStartEquity = strategy.initial_capital
 if newDay
     dayStartEquity := strategy.equity
-
-dailyPnL      = strategy.equity - dayStartEquity
-dailyPnLPct   = dayStartEquity > 0 ? (dailyPnL / dayStartEquity) * 100 : 0.0
-dailyLossOk   = not i_useDailyLoss   or dailyPnLPct > -i_dailyLossPct
-dailyProfitOk = not i_useDailyProfit or dailyPnLPct < i_dailyProfitPct
+dailyPnL    = strategy.equity - dayStartEquity
+dailyPnLPct = dayStartEquity > 0 ? (dailyPnL / dayStartEquity) * 100 : 0.0
+dailyLossOk = not i_useDailyLoss or dailyPnLPct > -i_dailyLossPct
 
 var int lastSLBar = 0
 wasLoss = strategy.closedtrades > 0 and strategy.closedtrades.profit(strategy.closedtrades - 1) < 0
@@ -316,22 +220,12 @@ if wasLoss and strategy.position_size == 0 and strategy.closedtrades > strategy.
     lastSLBar := bar_index
 cooldownOk = not i_useCooldown or (bar_index - lastSLBar) >= i_cooldownBars
 
-rsiNotExtreme_Long  = rsiValue < i_rsiOB
-rsiNotExtreme_Short = rsiValue > i_rsiOS
-
 var float peakEquity = strategy.initial_capital
 if strategy.equity > peakEquity
     peakEquity := strategy.equity
-
 equityDD = peakEquity > 0 ? (peakEquity - strategy.equity) / peakEquity * 100 : 0.0
-
-ddSizeFactor = not i_useEquityCurve ? 1.0 :
-     equityDD <= i_ddTier1   ? 1.00 :
-     equityDD <= i_ddTier2   ? 0.75 :
-     equityDD <= i_ddTier3   ? 0.50 :
-     equityDD <= i_ddSuspend ? 0.25 : 0.0
-
-tradingSuspended = i_useEquityCurve and ddSizeFactor <= 0
+inDrawdown = i_useEquityCurve and equityDD > i_ddThreshold
+sizeMult = inDrawdown ? (100.0 - i_ddReduction) / 100.0 : 1.0
 
 // ============================================================================
 // SECTION 6 -- ENTRY CONDITIONS
@@ -342,14 +236,12 @@ longCondition = i_enableLong
      and inSession
      and tradesAllowed
      and dailyLossOk
-     and dailyProfitOk
      and cooldownOk
-     and volatilityOk
-     and vwapExtensionOkLong
-     and not tradingSuspended
-     and triggerLong
-     and confluenceLong
-     and rsiNotExtreme_Long
+     and pullbackLong
+     and vwapOkLong
+     and htfOkLong
+     and rsiOkLong
+     and volumeOk
      and strategy.position_size <= 0
 
 shortCondition = i_enableShort
@@ -357,101 +249,78 @@ shortCondition = i_enableShort
      and inSession
      and tradesAllowed
      and dailyLossOk
-     and dailyProfitOk
      and cooldownOk
-     and volatilityOk
-     and vwapExtensionOkShort
-     and not tradingSuspended
-     and triggerShort
-     and confluenceShort
-     and rsiNotExtreme_Short
+     and pullbackShort
+     and vwapOkShort
+     and htfOkShort
+     and rsiOkShort
+     and volumeOk
      and strategy.position_size >= 0
 
 // ============================================================================
-// SECTION 7 -- REGIME-ADAPTIVE SL/TP
+// SECTION 7 -- POSITION SIZING (with hard dollar cap)
 // ============================================================================
 
-slMul = i_slAtrMul + (i_useRegimeAdapt and isTrending ? i_trendSlBonus : 0)
-tpMul = i_tpAtrMul + (i_useRegimeAdapt and isTrending ? i_trendTpBonus : 0)
+calcQty() =>
+    float rawDollar = 0.0
+    if i_qtyMode == "Fixed Dollar"
+        rawDollar := i_fixedDollar
+    else
+        riskDollars = strategy.equity * (i_riskPct / 100)
+        slDist      = i_slAtrMul * atrValue
+        rawDollar := slDist > 0 ? riskDollars / slDist * close : 0.0
+    // Apply drawdown reduction and hard cap
+    cappedDollar = math.min(rawDollar * sizeMult, i_maxQtyDollar)
+    cappedDollar > 0 ? cappedDollar / close : 0.0
 
-// ============================================================================
-// SECTION 8 -- TRADE EXECUTION
-// ============================================================================
-
-var float entryPrice     = na
-var int   entryBar       = na
-var float entryATR       = na
-var float entrySlMul     = na
-var float entryTpMul     = na
-
-// Risk-based position sizing
-riskDollars  = strategy.equity * (i_riskPct / 100)
-slDistance   = slMul * atrValue
-qtyRaw       = slDistance > 0 and syminfo.pointvalue > 0 ? riskDollars / (slDistance * syminfo.pointvalue) : 0.0
-qtyFinal     = qtyRaw * ddSizeFactor
+qtyFinal     = calcQty()
 canSizeTrade = qtyFinal > 0
 
+// ============================================================================
+// SECTION 8 -- TRADE EXECUTION (simple: SL + TP + trailing, no partial)
+// ============================================================================
+
+var float entryPrice = na
+var int   entryBar   = na
+var float entryATR   = na
+
 if longCondition and canSizeTrade
-    entryPrice  := close
-    entryBar    := bar_index
-    entryATR    := atrValue
-    entrySlMul  := slMul
-    entryTpMul  := tpMul
+    entryPrice := close
+    entryBar   := bar_index
+    entryATR   := atrValue
     dailyTradeCount += 1
 
-    sl = close - slMul * atrValue
-    tp = close + tpMul * atrValue
+    sl = close - i_slAtrMul * atrValue
+    tp = close + i_tpAtrMul * atrValue
 
-    strategy.entry("Long", strategy.long, qty = qtyFinal, comment = "L[" + str.tostring(longScore) + "]")
+    strategy.entry("Long", strategy.long, qty = qtyFinal, comment = "L")
 
-    // Partial TP: close portion at 1.5 ATR, keep SL unchanged (no breakeven move)
-    if i_usePartial
-        strategy.exit("Long Partial", from_entry = "Long",
-             qty_percent = i_partialPct,
-             limit       = close + i_partialMul * atrValue,
-             comment     = "L-P")
-
-    // Main exit: SL stays at original level, TP at full target, optional trailing
     trailPts    = i_useTrail ? i_trailAtrMul * atrValue / syminfo.mintick : na
     trailActPts = i_useTrail ? i_trailActMul * atrValue / syminfo.mintick : na
 
     strategy.exit("Long Exit", from_entry = "Long",
-         stop           = sl,
-         limit          = tp,
-         trail_points   = trailActPts,
-         trail_offset   = trailPts,
-         comment_loss   = "L-SL",
-         comment_profit = "L-TP")
+         stop = sl, limit = tp,
+         trail_points = trailActPts, trail_offset = trailPts,
+         comment_loss = "L-SL", comment_profit = "L-TP")
 
 if shortCondition and canSizeTrade
-    entryPrice  := close
-    entryBar    := bar_index
-    entryATR    := atrValue
-    entrySlMul  := slMul
-    entryTpMul  := tpMul
+    entryPrice := close
+    entryBar   := bar_index
+    entryATR   := atrValue
     dailyTradeCount += 1
 
-    sl = close + slMul * atrValue
-    tp = close - tpMul * atrValue
+    sl = close + i_slAtrMul * atrValue
+    tp = close - i_tpAtrMul * atrValue
 
-    strategy.entry("Short", strategy.short, qty = qtyFinal, comment = "S[" + str.tostring(shortScore) + "]")
-
-    if i_usePartial
-        strategy.exit("Short Partial", from_entry = "Short",
-             qty_percent = i_partialPct,
-             limit       = close - i_partialMul * atrValue,
-             comment     = "S-P")
+    strategy.entry("Short", strategy.short, qty = qtyFinal, comment = "S")
 
     trailPts    = i_useTrail ? i_trailAtrMul * atrValue / syminfo.mintick : na
     trailActPts = i_useTrail ? i_trailActMul * atrValue / syminfo.mintick : na
 
     strategy.exit("Short Exit", from_entry = "Short",
-         stop           = sl,
-         limit          = tp,
-         trail_points   = trailActPts,
-         trail_offset   = trailPts,
-         comment_loss   = "S-SL",
-         comment_profit = "S-TP")
+         stop = sl, limit = tp,
+         trail_points = trailActPts, trail_offset = trailPts,
+         comment_loss = "S-SL", comment_profit = "S-TP")
 
 // Sync entry price with actual fill
 if strategy.position_size > 0 and strategy.position_size[1] <= 0
@@ -459,7 +328,7 @@ if strategy.position_size > 0 and strategy.position_size[1] <= 0
 if strategy.position_size < 0 and strategy.position_size[1] >= 0
     entryPrice := strategy.position_avg_price
 
-// --- Stale trade exit ---
+// Stale trade exit
 if i_useStaleExit and strategy.position_size != 0 and not na(entryBar) and not na(entryATR)
     barsHeld = bar_index - entryBar
     if barsHeld >= i_staleBars
@@ -467,24 +336,15 @@ if i_useStaleExit and strategy.position_size != 0 and not na(entryBar) and not n
         if unrealizedMove < 0.5 * entryATR
             strategy.close_all(comment = "Stale")
 
-// --- Opposite signal exit ---
-if strategy.position_size > 0 and triggerShort and confluenceShort and barstate.isconfirmed
-    strategy.close("Long", comment = "L-Rev")
-
-if strategy.position_size < 0 and triggerLong and confluenceLong and barstate.isconfirmed
-    strategy.close("Short", comment = "S-Rev")
-
-// --- EOD close ---
+// EOD close
 if inCloseWindow and strategy.position_size != 0
     strategy.close_all(comment = "EOD")
 
-// --- Reset when flat ---
+// Reset
 if strategy.position_size == 0
     entryPrice := na
     entryBar   := na
     entryATR   := na
-    entrySlMul := na
-    entryTpMul := na
 
 // ============================================================================
 // SECTION 9 -- DEBUG STATUS
@@ -493,14 +353,12 @@ if strategy.position_size == 0
 longBlocker = not inSession ? "OUT_SESSION" :
      not tradesAllowed ? "MAX_TRADES" :
      not dailyLossOk ? "DAILY_LOSS" :
-     not dailyProfitOk ? "DAILY_PROFIT" :
      not cooldownOk ? "COOLDOWN" :
-     not volatilityOk ? "VOL_FILTER" :
-     not vwapExtensionOkLong ? "VWAP_2SIGMA" :
-     tradingSuspended ? "DD_SUSPEND" :
-     not triggerLong ? "TRIGGER" :
-     not confluenceLong ? "SCORE " + str.tostring(longScore) + "/" + str.tostring(scoreNeed) :
-     not rsiNotExtreme_Long ? "RSI_EXTREME" :
+     not pullbackLong ? "NO_PULLBACK" :
+     not vwapOkLong ? "BELOW_VWAP" :
+     not htfOkLong ? "HTF_BEAR" :
+     not rsiOkLong ? "RSI_OB" :
+     not volumeOk ? "LOW_VOL" :
      not canSizeTrade ? "SIZE_ZERO" :
      strategy.position_size > 0 ? "LONG_OPEN" :
      strategy.position_size < 0 ? "SHORT_OPEN" : "READY"
@@ -508,20 +366,18 @@ longBlocker = not inSession ? "OUT_SESSION" :
 shortBlocker = not inSession ? "OUT_SESSION" :
      not tradesAllowed ? "MAX_TRADES" :
      not dailyLossOk ? "DAILY_LOSS" :
-     not dailyProfitOk ? "DAILY_PROFIT" :
      not cooldownOk ? "COOLDOWN" :
-     not volatilityOk ? "VOL_FILTER" :
-     not vwapExtensionOkShort ? "VWAP_2SIGMA" :
-     tradingSuspended ? "DD_SUSPEND" :
-     not triggerShort ? "TRIGGER" :
-     not confluenceShort ? "SCORE " + str.tostring(shortScore) + "/" + str.tostring(scoreNeed) :
-     not rsiNotExtreme_Short ? "RSI_EXTREME" :
+     not pullbackShort ? "NO_PULLBACK" :
+     not vwapOkShort ? "ABOVE_VWAP" :
+     not htfOkShort ? "HTF_BULL" :
+     not rsiOkShort ? "RSI_OS" :
+     not volumeOk ? "LOW_VOL" :
      not canSizeTrade ? "SIZE_ZERO" :
      strategy.position_size < 0 ? "SHORT_OPEN" :
      strategy.position_size > 0 ? "LONG_OPEN" : "READY"
 
-longBlockerColor = longBlocker == "READY" ? color.lime : longBlocker == "TRIGGER" or str.contains(longBlocker, "SCORE") ? color.orange : color.red
-shortBlockerColor = shortBlocker == "READY" ? color.lime : shortBlocker == "TRIGGER" or str.contains(shortBlocker, "SCORE") ? color.orange : color.red
+lbColor = longBlocker == "READY" ? color.lime : str.contains(longBlocker, "PULLBACK") ? color.orange : color.red
+sbColor = shortBlocker == "READY" ? color.lime : str.contains(shortBlocker, "PULLBACK") ? color.orange : color.red
 
 // ============================================================================
 // SECTION 10 -- BACKTESTER METRICS
@@ -575,15 +431,10 @@ cagrApprox   = not na(elapsedYears) and elapsedYears > 0 and strategy.initial_ca
 // SECTION 11 -- VISUALS
 // ============================================================================
 
-plot(emaFast,    "EMA Fast",    color.new(color.blue, 30),   1)
-plot(emaSlow,    "EMA Slow",    color.new(color.orange, 30), 1)
-plot(emaTrend,   "EMA Trend",   color.new(color.gray, 50),   2)
-plot(i_useVwap ? vwapValue : na,       "VWAP",        color.new(color.purple, 20), 2, plot.style_stepline)
-plot(i_useVwapBands ? vwapUpper1 : na, "VWAP +1sig",  color.new(color.green, 55), 1)
-plot(i_useVwapBands ? vwapLower1 : na, "VWAP -1sig",  color.new(color.red, 55),   1)
-plot(i_useHTF ? htfEma : na,           "HTF EMA 60m", color.new(color.yellow, 40), 2, plot.style_cross)
-plot(i_useHTFMid ? htfMidEma : na,     "HTF EMA 15m", color.new(color.aqua, 45), 2)
-plot(i_useSuper ? superLine : na,      "Supertrend",  color.new(color.fuchsia, 35), 2)
+plot(emaFast,  "EMA Fast",  color.new(color.blue, 30),   1)
+plot(emaSlow,  "EMA Slow",  color.new(color.orange, 30), 1)
+plot(i_useVwap ? vwapValue : na, "VWAP", color.new(color.purple, 20), 2, plot.style_stepline)
+plot(i_useHTF ? htfEma : na,     "HTF EMA", color.new(color.yellow, 40), 2, plot.style_cross)
 
 plotshape(longCondition and canSizeTrade,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
 plotshape(shortCondition and canSizeTrade, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
@@ -591,72 +442,83 @@ plotshape(shortCondition and canSizeTrade, "Short", shape.triangledown, location
 bgcolor(inSession ? color.new(color.blue, 97) : color.new(color.gray, 98), title = "Session")
 bgcolor(inCloseWindow ? color.new(color.red, 90) : na, title = "EOD")
 bgcolor(not dailyLossOk ? color.new(color.red, 85) : na, title = "Loss Limit")
-bgcolor(i_useDailyProfit and not dailyProfitOk ? color.new(color.green, 88) : na, title = "Profit Target")
 barcolor(longCondition and canSizeTrade ? color.lime : shortCondition and canSizeTrade ? color.fuchsia : na)
 
 // ============================================================================
 // SECTION 12 -- DASHBOARD
 // ============================================================================
 
-var table dash = table.new(position.top_right, 2, 20,
-                 bgcolor = color.new(color.black, 20),
-                 border_width = 1, border_color = color.gray,
-                 frame_width = 2, frame_color = color.white)
-
 totalTrades = strategy.closedtrades
 wins = strategy.wintrades
 winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0.0
 pf = strategy.grossloss != 0 ? math.abs(strategy.grossprofit / strategy.grossloss) : 0.0
-positionPct = ddSizeFactor * 100.0
 
-regimeStr = isTrending ? "TREND" : "RANGE"
-regimeColor = isTrending ? color.green : color.orange
 trendStr = emaBullish and aboveVwap ? "BULL" : emaBearish and belowVwap ? "BEAR" : "MIXED"
 trendColor = trendStr == "BULL" ? color.green : trendStr == "BEAR" ? color.red : color.gray
-vwapCtx = aboveVwap1 ? "+1sig" : belowVwap1 ? "-1sig" : aboveVwap ? ">VWAP" : belowVwap ? "<VWAP" : "AT VWAP"
-vwapCtxColor = aboveVwap1 ? color.green : belowVwap1 ? color.red : color.white
+
+var table dash = table.new(position.top_right, 2, 16,
+                 bgcolor = color.new(color.black, 20),
+                 border_width = 1, border_color = color.gray,
+                 frame_width = 2, frame_color = color.white)
 
 if barstate.isconfirmed
     table.cell(dash, 0, 0,  "Metric",       text_color = color.white,  text_size = size.small, text_halign = text.align_left)
     table.cell(dash, 1, 0,  "Value",        text_color = color.white,  text_size = size.small, text_halign = text.align_right)
     table.cell(dash, 0, 1,  "Trend",        text_color = color.silver, text_size = size.small, text_halign = text.align_left)
     table.cell(dash, 1, 1,  trendStr,        text_color = trendColor,   text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 2,  "Regime",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 2,  regimeStr + " (" + str.tostring(adxValue, "#.#") + ")", text_color = regimeColor, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 3,  "Long Score",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 3,  str.tostring(longScore) + "/9", text_color = longScore >= scoreNeed ? color.green : color.gray, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 4,  "Short Score",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 4,  str.tostring(shortScore) + "/9", text_color = shortScore >= scoreNeed ? color.red : color.gray, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 5,  "Req Score",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 5,  str.tostring(scoreNeed) + (inMidday ? " MID" : ""), text_color = inMidday ? color.orange : color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 6,  "VWAP Ctx",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 6,  vwapCtx, text_color = vwapCtxColor, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 7,  "RSI",          text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 7,  str.tostring(rsiValue, "#.#"), text_color = rsiValue > i_rsiOB ? color.red : rsiValue < i_rsiOS ? color.green : color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 8,  "MACD Hist",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 8,  str.tostring(macdHist, "#.####"), text_color = macdHist > 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 9,  "Daily Trades", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 9,  str.tostring(dailyTradeCount) + "/" + str.tostring(i_maxTrades), text_color = dailyTradeCount >= i_maxTrades ? color.red : color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 10, "Daily P&L",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 10, str.tostring(dailyPnLPct, "#.##") + "% / " + str.tostring(i_dailyProfitPct, "#.##") + "%", text_color = dailyPnLPct >= i_dailyProfitPct ? color.green : dailyPnLPct > -i_dailyLossPct ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 11, "Win Rate",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 11, str.tostring(winRate, "#.#") + "% (" + str.tostring(totalTrades) + ")", text_color = winRate >= 50 ? color.green : winRate >= 40 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 12, "Profit Factor", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 12, str.tostring(pf, "#.##"), text_color = pf > 1.5 ? color.green : pf > 1.0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 13, "Trade Count",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 13, str.tostring(totalTrades), text_color = totalTrades > 0 ? color.white : color.gray, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 14, "Max DD",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 14, str.tostring(maxDrawdownSeen, "#.##") + "%", text_color = maxDrawdownSeen > 10 ? color.red : maxDrawdownSeen > 5 ? color.orange : color.green, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 15, "Sharpe",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 15, na(sharpeApprox) ? "n/a" : str.tostring(sharpeApprox, "#.##"), text_color = na(sharpeApprox) ? color.gray : sharpeApprox >= 1 ? color.green : sharpeApprox >= 0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 16, "Sortino",      text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 16, na(sortinoApprox) ? "n/a" : str.tostring(sortinoApprox, "#.##"), text_color = na(sortinoApprox) ? color.gray : sortinoApprox >= 1.5 ? color.green : sortinoApprox >= 0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 17, "CAGR",         text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 17, na(cagrApprox) ? "n/a" : str.tostring(cagrApprox, "#.##") + "%", text_color = na(cagrApprox) ? color.gray : cagrApprox >= 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 18, "Risk Size",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 18, str.tostring(i_riskPct, "#.##") + "% x " + str.tostring(positionPct, "#.##") + "%", text_color = positionPct >= 100 ? color.green : positionPct > 0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dash, 0, 19, "Equity DD%",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dash, 1, 19, str.tostring(equityDD, "#.##") + "%", text_color = equityDD > i_ddTier3 ? color.red : equityDD > i_ddTier1 ? color.orange : color.green, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 2,  "RSI",          text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 2,  str.tostring(rsiValue, "#.#"), text_color = rsiValue > i_rsiOB ? color.red : rsiValue < i_rsiOS ? color.green : color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 3,  "Daily Trades", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 3,  str.tostring(dailyTradeCount) + "/" + str.tostring(i_maxTrades), text_color = dailyTradeCount >= i_maxTrades ? color.red : color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 4,  "Daily P&L",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 4,  str.tostring(dailyPnLPct, "#.##") + "%", text_color = dailyPnLPct > 0 ? color.green : dailyPnLPct > -i_dailyLossPct ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 5,  "Win Rate",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 5,  str.tostring(winRate, "#.#") + "% (" + str.tostring(totalTrades) + ")", text_color = winRate >= 50 ? color.green : winRate >= 40 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 6,  "Profit Factor", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 6,  str.tostring(pf, "#.##"), text_color = pf > 1.5 ? color.green : pf > 1.0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 7,  "Trade Count",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 7,  str.tostring(totalTrades), text_color = color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 8,  "Max DD",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 8,  str.tostring(maxDrawdownSeen, "#.##") + "%", text_color = maxDrawdownSeen > 10 ? color.red : maxDrawdownSeen > 5 ? color.orange : color.green, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 9,  "Sharpe",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 9,  na(sharpeApprox) ? "n/a" : str.tostring(sharpeApprox, "#.##"), text_color = na(sharpeApprox) ? color.gray : sharpeApprox >= 1 ? color.green : sharpeApprox >= 0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 10, "Sortino",      text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 10, na(sortinoApprox) ? "n/a" : str.tostring(sortinoApprox, "#.##"), text_color = na(sortinoApprox) ? color.gray : sortinoApprox >= 1.5 ? color.green : sortinoApprox >= 0 ? color.orange : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 11, "CAGR",         text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 11, na(cagrApprox) ? "n/a" : str.tostring(cagrApprox, "#.##") + "%", text_color = na(cagrApprox) ? color.gray : cagrApprox >= 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 12, "Pos Size $",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 12, "$" + str.tostring(qtyFinal * close, "#"), text_color = color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 13, "Commission %", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    commPct = strategy.grossprofit > 0 ? (strategy.closedtrades > 0 ? strategy.grossprofit : 0) : 0
+    table.cell(dash, 1, 13, str.tostring(0.05 * 2, "#.##") + "% RT", text_color = color.orange, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 14, "Equity DD%",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 14, str.tostring(equityDD, "#.##") + "%", text_color = equityDD > 10 ? color.red : equityDD > 5 ? color.orange : color.green, text_size = size.small, text_halign = text.align_right)
+    table.cell(dash, 0, 15, "Position",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dash, 1, 15, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color = strategy.position_size == 0 ? color.white : strategy.position_size > 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
+
+// --- Debug Panel ---
+var table dbg = table.new(position.bottom_right, 2, 8,
+                 bgcolor = color.new(color.black, 20),
+                 border_width = 1, border_color = color.gray,
+                 frame_width = 2, frame_color = color.silver)
+
+if barstate.isconfirmed and i_showDebug
+    table.cell(dbg, 0, 0, "Debug",       text_color = color.white,  text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 0, syminfo.ticker + " " + timeframe.period, text_color = color.white, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 1, "Long Gate",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 1, longBlocker,    text_color = lbColor, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 2, "Short Gate",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 2, shortBlocker,   text_color = sbColor, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 3, "EMA Trend",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 3, emaBullish ? "BULL" : emaBearish ? "BEAR" : "FLAT", text_color = emaBullish ? color.green : emaBearish ? color.red : color.gray, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 4, "HTF 60m",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 4, htfBullish ? "BULL" : htfBearish ? "BEAR" : "FLAT", text_color = htfBullish ? color.green : htfBearish ? color.red : color.gray, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 5, "VWAP",        text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 5, aboveVwap ? "ABOVE" : "BELOW", text_color = aboveVwap ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 6, "PB Long",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 6, pullbackLong ? "YES" : "NO", text_color = pullbackLong ? color.green : color.gray, text_size = size.small, text_halign = text.align_right)
+    table.cell(dbg, 0, 7, "PB Short",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(dbg, 1, 7, pullbackShort ? "YES" : "NO", text_color = pullbackShort ? color.green : color.gray, text_size = size.small, text_halign = text.align_right)
 
 // --- Backtester Panel ---
 var table bt = table.new(position.bottom_left, 2, 8,
@@ -682,55 +544,15 @@ if barstate.isconfirmed and i_showBacktester
     table.cell(bt, 0, 7, "CAGR", text_color = color.silver, text_size = size.small, text_halign = text.align_left)
     table.cell(bt, 1, 7, na(cagrApprox) ? "n/a" : str.tostring(cagrApprox, "#.##") + "%", text_color = na(cagrApprox) ? color.gray : cagrApprox >= 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
 
-// --- Debug Panel ---
-var table dbg = table.new(position.bottom_right, 2, 13,
-                 bgcolor = color.new(color.black, 20),
-                 border_width = 1, border_color = color.gray,
-                 frame_width = 2, frame_color = color.silver)
-
-if barstate.isconfirmed and i_showDebug
-    table.cell(dbg, 0, 0,  "Debug",         text_color = color.white,  text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color = color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 1,  "Long Gate",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 1,  longBlocker,      text_color = longBlockerColor, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 2,  "Short Gate",    text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 2,  shortBlocker,     text_color = shortBlockerColor, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 3,  "MACD",          text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 3,  str.tostring(macdLine, "#.####") + " / " + str.tostring(macdSignalLine, "#.####"), text_color = macdBullish ? color.green : macdBearish ? color.red : color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 4,  "Trigger L/S",   text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 4,  (triggerLong ? "L" : "-") + " / " + (triggerShort ? "S" : "-"), text_color = triggerLong or triggerShort ? color.green : color.orange, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 5,  "Score L/S",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 5,  str.tostring(longScore) + " / " + str.tostring(shortScore) + " | need " + str.tostring(scoreNeed), text_color = color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 6,  "ADX",           text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 6,  str.tostring(adxValue, "#.#") + " vs " + str.tostring(i_adxThresh), text_color = isTrending ? color.green : color.orange, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 7,  "HTF 60/15",     text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 7,  (htfBullish ? "B" : htfBearish ? "S" : "-") + " / " + (htfMidBullish ? "B" : htfMidBearish ? "S" : "-"), text_color = color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 8,  "VWAP Ctx",      text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 8,  vwapCtx + (inMidday ? " MID" : ""), text_color = aboveVwap ? color.green : belowVwap ? color.red : color.white, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 9,  "Risk Qty",      text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 9,  str.tostring(qtyFinal, "#.####"), text_color = canSizeTrade ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 10, "Daily Limits",  text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 10, (dailyLossOk ? "DL OK" : "DL HIT") + " / " + (dailyProfitOk ? "DP OK" : "DP HIT"), text_color = dailyLossOk and dailyProfitOk ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 11, "Position",      text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 11, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color = strategy.position_size == 0 ? color.white : strategy.position_size > 0 ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-    table.cell(dbg, 0, 12, "NY Time",       text_color = color.silver, text_size = size.small, text_halign = text.align_left)
-    table.cell(dbg, 1, 12, str.tostring(nyHour, "00") + ":" + str.tostring(nyMinute, "00"), text_color = inSession ? color.green : color.red, text_size = size.small, text_halign = text.align_right)
-
 // ============================================================================
 // SECTION 13 -- ALERTS
 // ============================================================================
 
 if longCondition and canSizeTrade
-    alert("5m v7: LONG | " + syminfo.ticker + " @ " + str.tostring(close) + " | Score: " + str.tostring(longScore) + "/9 | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"), alert.freq_once_per_bar_close)
+    alert("v8 PB: LONG | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
 
 if shortCondition and canSizeTrade
-    alert("5m v7: SHORT | " + syminfo.ticker + " @ " + str.tostring(close) + " | Score: " + str.tostring(shortScore) + "/9 | RSI: " + str.tostring(rsiValue, "#.#") + " | ADX: " + str.tostring(adxValue, "#.#"), alert.freq_once_per_bar_close)
+    alert("v8 PB: SHORT | " + syminfo.ticker + " @ " + str.tostring(close) + " | RSI: " + str.tostring(rsiValue, "#.#"), alert.freq_once_per_bar_close)
 
 if inCloseWindow and strategy.position_size != 0
-    alert("5m v7: EOD Close | " + syminfo.ticker + " @ " + str.tostring(close), alert.freq_once_per_bar_close)
-
-if not dailyLossOk and dailyLossOk[1]
-    alert("5m v7: Daily loss limit | " + syminfo.ticker + " | P&L: " + str.tostring(dailyPnLPct, "#.##") + "%", alert.freq_once_per_bar_close)
-
-if i_useDailyProfit and not dailyProfitOk and dailyProfitOk[1]
-    alert("5m v7: Daily profit target | " + syminfo.ticker + " | P&L: " + str.tostring(dailyPnLPct, "#.##") + "%", alert.freq_once_per_bar_close)
+    alert("v8 PB: EOD Close | " + syminfo.ticker, alert.freq_once_per_bar_close)
