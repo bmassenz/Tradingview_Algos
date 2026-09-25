@@ -86,6 +86,9 @@ def composite_reward(per_asset, min_campaigns_is=10):
     disp_pen += 0.5 * (r_is.mean() - r_is.min()) + 0.5 * (r_oos.mean() - r_oos.min())
     # Keep the overlay a live part of the strategy: require a minimum number of campaigns per asset
     act_pen = sum(0.05 * max(0, min_campaigns_is - per_asset[s]["IS"]["overlay_campaigns"]) for s in syms)
-    reward = base - oos_pen - disp_pen - act_pen
+    # Overlay expectancy: the win-rate term alone rewards tiny targets with negative expectancy
+    # after costs, so any asset whose overlay loses money IS or OOS is penalised.
+    ov_pen = sum(0.5 for s in syms for w in ("IS", "OOS") if per_asset[s][w]["overlay_pnl"] < 0)
+    reward = base - oos_pen - disp_pen - act_pen - ov_pen
     return float(reward), dict(base=float(base), oos_pen=float(oos_pen), disp_pen=float(disp_pen),
-                               act_pen=float(act_pen), r_is=r_is.tolist(), r_oos=r_oos.tolist())
+                               act_pen=float(act_pen), ov_pen=float(ov_pen), r_is=r_is.tolist(), r_oos=r_oos.tolist())

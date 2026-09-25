@@ -86,6 +86,29 @@ def stdev(src, n):
 
 
 @njit(cache=True)
+def stdev_nan(src, n):
+    """Population stdev that is na while any value in the window is na (Pine semantics)."""
+    out = np.full(src.size, np.nan)
+    for i in range(n - 1, src.size):
+        ok = True
+        m = 0.0
+        for j in range(i - n + 1, i + 1):
+            if np.isnan(src[j]):
+                ok = False
+                break
+            m += src[j]
+        if not ok:
+            continue
+        m /= n
+        v = 0.0
+        for j in range(i - n + 1, i + 1):
+            d = src[j] - m
+            v += d * d
+        out[i] = math.sqrt(v / n)
+    return out
+
+
+@njit(cache=True)
 def atr(h, l, c, n):
     tr = np.empty(c.size)
     tr[0] = h[0] - l[0]
@@ -192,6 +215,7 @@ P_KEYS = [
     "useVolShockFilter", "volSpikeMax", "useGapFilter", "gapAtrMax",
     "overlayRiskPct", "maxOverlayRiskCash", "maxOverlayNotionalPct", "maxGrossExposurePct",
     "enableOverlay", "flattenOverlayWithoutCore", "minOverlayQty",
+    "useCoreVolTarget", "coreVolTargetPct",
 ]
 
 DEFAULTS = dict(
@@ -206,6 +230,7 @@ DEFAULTS = dict(
     useGapFilter=0, gapAtrMax=1.0,
     overlayRiskPct=0.25, maxOverlayRiskCash=65.0, maxOverlayNotionalPct=25.0,
     maxGrossExposurePct=125.0, enableOverlay=1, flattenOverlayWithoutCore=1, minOverlayQty=3.0,
+    useCoreVolTarget=0, coreVolTargetPct=18.0, coreVolLen=63,
 )
 
 
@@ -232,9 +257,15 @@ def indicators(asset, p):
         return atr(h, l, c, int(vk[0])) / atr(h, l, c, int(vk[1]))
 
     vr = asset.cached(("vol",) + vk, _vol)
+    def _rv():
+        lr = np.full(c.size, np.nan)
+        lr[1:] = np.log(c[1:] / c[:-1])
+        return stdev_nan(lr, int(p["coreVolLen"])) * math.sqrt(252.0) * 100.0
+
+    rv = asset.cached(("rv", p["coreVolLen"]), _rv)
     gap = np.full(c.size, np.nan)
     gap[1:] = np.abs(o[1:] - c[:-1]) / a[:-1]
-    return e, a, r, wae_ok, wae_dd, htf, vr, gap
+    return e, a, r, wae_ok, wae_dd, htf, vr, gap, rv
 
 
 @njit(cache=True)
@@ -261,16 +292,16 @@ def _exit_long(o, h, l, stop, limit, slip):
 
 
 @njit(cache=True)
-def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, gap_atr, start, P, capital):
+def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, gap_atr, rv, start, P, capital):
     n = c.size
     slip = SLIP_TICKS * TICK
     (alloc, trail, cooldown, atr_stop_mult, t1r, t2r, t3r, use_be, be_r, trail_start_r,
      atr_trail_mult, hx_mom, hx_trend, rsi_hx, rsi_entry, use_rsi, use_slope, use_htf,
      use_vol, vol_max, use_gap, gap_max, risk_pct, risk_cap, notional_pct, gross_pct,
-     enable_ov, flatten_orphan, min_ov_qty) = (P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7], P[8],
+     enable_ov, flatten_orphan, min_ov_qty, use_vt, vt_pct) = (P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7], P[8],
                                                P[9], P[10], P[11], P[12], P[13], P[14], P[15], P[16], P[17],
                                                P[18], P[19], P[20], P[21], P[22], P[23], P[24], P[25],
-                                               P[26], P[27], P[28])
+                                               P[26], P[27], P[28], P[29], P[30])
 
     equity = np.full(n, capital)
     exposure = np.zeros(n)
@@ -407,7 +438,10 @@ def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, g
             core_stop = np.nan
         cooldown_ok = cooldown_until < 0 or i >= cooldown_until
         if i >= start and trend_ok and (not core_open) and cooldown_ok:
-            q = math.floor((capital * alloc / 100.0) / ci)
+            scale = 1.0
+            if use_vt > 0.5:
+                scale = 0.0 if np.isnan(rv[i]) or rv[i] <= 0 else min(1.0, vt_pct / rv[i])
+            q = math.floor((capital * alloc / 100.0 * scale) / ci)
             if q >= 1:
                 core_pend_entry = True
                 core_pend_qty = q
@@ -496,9 +530,9 @@ def full_params(p):
 
 def backtest(asset, p, start_date="2008-01-01"):
     p = full_params(p)
-    e, a, r, wok, wdd, htf, vr, gap = indicators(asset, p)
+    e, a, r, wok, wdd, htf, vr, gap, rv = indicators(asset, p)
     P = np.array([float(p[k]) for k in P_KEYS])
-    res = run_engine(asset.o, asset.h, asset.l, asset.c, e, a, r, wok, wdd, htf, vr, gap,
+    res = run_engine(asset.o, asset.h, asset.l, asset.c, e, a, r, wok, wdd, htf, vr, gap, rv,
                      asset.idx(start_date), P, CAPITAL)
     eq, expo, kind, ei, xi, qty, epx, xpx, pnl = res
     trades = pd.DataFrame(dict(kind=kind, entry_idx=ei, exit_idx=xi, qty=qty, entry_px=epx,

@@ -75,6 +75,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--envs", type=int, default=4)
     ap.add_argument("--tag", default="run")
+    ap.add_argument("--init", default="", help="selection JSON whose chosen_raw seeds the policy mean")
     args = ap.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True)
     torch.set_num_threads(1)
@@ -90,7 +91,8 @@ def main():
     )
     # Start the policy mean at the original script's parameters
     with torch.no_grad():
-        model.policy.action_net.bias.copy_(torch.tensor(encode(ORIGINAL_RAW), dtype=torch.float32))
+        start_raw = json.load(open(args.init))["chosen_raw"] if args.init else ORIGINAL_RAW
+        model.policy.action_net.bias.copy_(torch.tensor(encode(start_raw), dtype=torch.float32))
         model.policy.action_net.weight.mul_(0.0)
     t0 = time.time()
     model.learn(total_timesteps=args.steps)
