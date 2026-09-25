@@ -1,5 +1,9 @@
 // Bridge every wss:// the page opens through a Node ws client tunnelled via the agent proxy (CONNECT).
-const net = require('net'), tls = require('tls'), fs = require('fs'); const WebSocket = require('ws');
+// installRestFix additionally serves the Pine-facade REST calls whose path holds a ';' (script ids look
+// like USER;<hash>) through the same tunnel: the agent proxy rejects those paths from Chromium with
+// "request rejected: path contains matrix parameter separator", which leaves the strategy on the chart
+// with "Error: cannot compile script".
+const net = require('net'), tls = require('tls'), https = require('https'), fs = require('fs'); const WebSocket = require('ws');
 const u = new URL(process.env.HTTPS_PROXY);
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 function tunnel(host, port) {
@@ -28,4 +32,23 @@ async function install(page, log = () => {}) {
     route.onClose(() => { try { upstream.close(); } catch (_) {} });
   });
 }
-module.exports = { install, UA };
+async function installRestFix(page, log = () => {}) {
+  await page.route(/^https:\/\/pine-facade\.tradingview\.com\/.*(%3B|;)/i, async route => {
+    const r = route.request(); const url = new URL(r.url());
+    try {
+      const t = await tunnel(url.hostname, 443);
+      const headers = Object.assign({}, r.headers()); delete headers['content-length']; delete headers.connection; headers.host = url.hostname; headers['accept-encoding'] = 'identity';
+      const body = r.postDataBuffer();
+      const res = await new Promise((resolve, reject) => {
+        const rq = https.request({ createConnection: () => t, host: url.hostname, path: url.pathname + url.search, method: r.method(), headers, agent: false }, resp => {
+          const chunks = []; resp.on('data', c => chunks.push(c)); resp.on('end', () => resolve({ status: resp.statusCode, headers: resp.headers, body: Buffer.concat(chunks) })); });
+        rq.on('error', reject); if (body) rq.write(body); rq.end();
+      });
+      const h = {}; for (const [k, v] of Object.entries(res.headers)) if (!/^(transfer-encoding|connection|content-encoding|set-cookie)$/i.test(k)) h[k] = String(v);
+      h['content-length'] = String(res.body.length);
+      log('rest via tunnel ' + r.method() + ' ' + url.pathname.slice(0, 70) + ' -> ' + res.status);
+      await route.fulfill({ status: res.status, headers: h, body: res.body });
+    } catch (e) { log('rest fix fail ' + url.pathname.slice(0, 70) + ' ' + e.message); await route.abort().catch(() => {}); }
+  });
+}
+module.exports = { install, installRestFix, UA };
