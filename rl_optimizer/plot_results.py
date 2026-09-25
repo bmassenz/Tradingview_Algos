@@ -29,7 +29,8 @@ def main(tag):
             eq, _, _ = backtest(a, p)
             ax.plot(d, (eq[i0 - 1:] - eq[i0 - 1]) / 1000, label=lab, color=col, lw=1.3)
         px = a.c[i0 - 1:]
-        ax.plot(d, np.floor(CAPITAL / px[0]) * (px - px[0]) / 1000, label="Buy & hold ($26k)", color="#8c8c8c", lw=1)
+        bh = np.concatenate([[0.0], np.cumsum(np.diff(px) / px[:-1] * CAPITAL)])
+        ax.plot(d, bh / 1000, label="Buy & hold, constant $26k", color="#8c8c8c", lw=1)
         for w, col in (("OOS", "#fff4d6"), ("HOLDOUT", "#e6f4ea")):
             ax.axvspan(np.datetime64(WINDOWS[w][0]), d[-1] if w == "HOLDOUT" else np.datetime64(WINDOWS[w][1]), color=col, zorder=0)
         ax.set_title(s)

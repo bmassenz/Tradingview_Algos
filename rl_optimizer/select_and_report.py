@@ -44,10 +44,10 @@ def neighbourhood_score(assets, raw, rng, n=24, sigma=0.08):
 def buy_and_hold(asset, start, end):
     a = asset.idx(start)
     b = int(np.searchsorted(asset.dates.values, np.datetime64(end), side="right"))
+    # Constant $26k exposure (daily rebalanced), matching the strategy's fixed paper sizing
     px = asset.c[a - 1:b]
-    qty = np.floor(CAPITAL / px[0])
-    eq = CAPITAL + qty * (px - px[0])
-    r = np.diff(eq) / CAPITAL
+    r = np.diff(px) / px[:-1]
+    eq = CAPITAL + np.concatenate([[0.0], np.cumsum(r * CAPITAL)])
     peak = np.maximum.accumulate(eq)
     return dict(pnl_annual=(eq[-1] - eq[0]) / (len(r) / 252), sharpe=r.mean() / r.std(ddof=1) * np.sqrt(252),
                 max_dd=float(np.max(peak - eq)) / CAPITAL)

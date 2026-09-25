@@ -13,6 +13,12 @@
 // - close_entries_rule = "ANY" so every exit closes only the entry it is attached to.
 // - Chart data is split-adjusted by TradingView. Dividends are not included (conservative for ETFs).
 //
+// Default inputs (2026-09-25): selected by a PPO search over SPY, QQQ, SMH and IWM daily bars,
+// each tested independently (in-sample 2008-2019, out-of-sample 2020-2022, untouched holdout
+// 2023-2026), ranked by a cross-asset composite reward averaged over a parameter neighbourhood.
+// See rl_optimizer/README.md. One parameter set, no per-symbol changes.
+// Chart: daily. The weekly WAE needs ~85 weeks of history; load bars from 2006 or earlier.
+//
 // IMPORTANT:
 // - This is a systematic research strategy, not investment advice.
 // - For live automation, use broker-native protective orders and broker-authoritative reconciliation.
@@ -66,7 +72,7 @@ coreAllocationPct = input.float(
 )
 
 emaLen = input.int(
-     150, "EMA Trend Length",
+     251, "EMA Trend Length",
      minval = 20, maxval = 500, step = 5, group = grpCore
 )
 
@@ -76,13 +82,13 @@ useEMASlopeFilter = input.bool(
 )
 
 coreTrailPct = input.float(
-     5.0, "Core Trailing Stop %",
+     15.25, "Core Trailing Stop %",
      minval = 1.0, maxval = 30.0, step = 0.25, group = grpCore,
      tooltip = "Trailing stop from the highest high since entry. A gap through the stop fills at the open, which can be worse than this percentage."
 )
 
 coreReentryCooldown = input.int(
-     0, "Core Re-entry Cooldown (bars)",
+     12, "Core Re-entry Cooldown (bars)",
      minval = 0, maxval = 60, group = grpCore,
      tooltip = "Bars to wait after any Core exit before a new Core entry. Reduces stop-out / re-entry whipsaw."
 )
@@ -96,49 +102,49 @@ enableOverlay = input.bool(
 )
 
 fastLen = input.int(
-     30, "WAE Fast EMA Length",
+     5, "WAE Fast EMA Length",
      minval = 1, maxval = 250, group = grpSignal
 )
 
 slowLen = input.int(
-     90, "WAE Slow EMA Length",
+     82, "WAE Slow EMA Length",
      minval = 2, maxval = 500, group = grpSignal
 )
 
 waeBBLen = input.int(
-     20, "WAE Explosion Length",
+     10, "WAE Explosion Length",
      minval = 2, maxval = 250, group = grpSignal
 )
 
 waeBBMult = input.float(
-     0.05, "WAE Explosion Threshold (Up/StDev)",
+     0.0101, "WAE Explosion Threshold (Up/StDev)",
      minval = 0.001, maxval = 5.0, step = 0.005, group = grpSignal,
      tooltip = "Normalized WAE: require MACD-hist / StDev(close, explosion length) above this level. Dimensionless, so it transfers across symbols and price levels."
 )
 
 deadMult = input.float(
-     0.02, "WAE Dead-Zone Threshold (Up/StDev)",
+     0.0055, "WAE Dead-Zone Threshold (Up/StDev)",
      minval = 0.0005, maxval = 5.0, step = 0.005, group = grpSignal,
      tooltip = "Normalized dead floor in Up/StDev units. Hist must also clear this and be rising."
 )
 
 useRSIFilter = input.bool(
-     true, "Use RSI Momentum Filter",
+     false, "Use RSI Momentum Filter",
      group = grpSignal
 )
 
 rsiLen = input.int(
-     14, "RSI Length",
+     9, "RSI Length",
      minval = 2, maxval = 100, group = grpSignal
 )
 
 rsiEntryThreshold = input.float(
-     60.0, "Minimum RSI for Overlay Entry",
+     57.95, "Minimum RSI for Overlay Entry",
      minval = 40.0, maxval = 95.0, step = 0.5, group = grpSignal
 )
 
 rsiHardExitThreshold = input.float(
-     48.0, "RSI Hard-Exit Threshold",
+     43.8, "RSI Hard-Exit Threshold",
      minval = 5.0, maxval = 60.0, step = 0.5, group = grpSignal
 )
 
@@ -163,12 +169,12 @@ htfManualTf = input.timeframe(
 // Portfolio and trade-risk inputs
 // ============================================================================
 atrLen = input.int(
-     21, "ATR Length",
+     12, "ATR Length",
      minval = 1, maxval = 250, group = grpRisk
 )
 
 atrStopMult = input.float(
-     1.5, "Initial Overlay Stop: ATR Multiplier",
+     4.0, "Initial Overlay Stop: ATR Multiplier",
      minval = 0.25, maxval = 10.0, step = 0.05, group = grpRisk
 )
 
@@ -223,17 +229,17 @@ minOverlayQty = input.float(
 // Overlay exits
 // ============================================================================
 tier1R = input.float(
-     1.0, "Tier 1 Target (R)",
+     0.5, "Tier 1 Target (R)",
      minval = 0.25, maxval = 20.0, step = 0.05, group = grpExit
 )
 
 tier2R = input.float(
-     2.0, "Tier 2 Target (R)",
+     0.75, "Tier 2 Target (R)",
      minval = 0.5, maxval = 30.0, step = 0.05, group = grpExit
 )
 
 tier3R = input.float(
-     4.0, "Tier 3 Maximum Target (R)",
+     1.25, "Tier 3 Maximum Target (R)",
      minval = 1.0, maxval = 50.0, step = 0.05, group = grpExit
 )
 
@@ -243,22 +249,22 @@ useBreakEven = input.bool(
 )
 
 breakEvenTriggerR = input.float(
-     0.75, "Breakeven Trigger (R)",
+     1.62, "Breakeven Trigger (R)",
      minval = 0.1, maxval = 10.0, step = 0.05, group = grpExit
 )
 
 trailStartR = input.float(
-     2.0, "Tier 3 ATR Trail Begins at (R)",
+     1.11, "Tier 3 ATR Trail Begins at (R)",
      minval = 0.25, maxval = 20.0, step = 0.05, group = grpExit
 )
 
 atrTrailMult = input.float(
-     1.0, "Tier 3 ATR Trail Multiplier",
+     0.5, "Tier 3 ATR Trail Multiplier",
      minval = 0.25, maxval = 10.0, step = 0.05, group = grpExit
 )
 
 hardExitOnMomentumLoss = input.bool(
-     true, "Exit Remaining Overlay on Momentum Loss",
+     false, "Exit Remaining Overlay on Momentum Loss",
      group = grpExit
 )
 
@@ -277,7 +283,7 @@ flattenOverlayWithoutCore = input.bool(
 // Event / gap volatility guards (earnings-season and macro shock proxies)
 // ============================================================================
 useVolShockFilter = input.bool(
-     true, "Block Overlay Entry on Volatility Shock",
+     false, "Block Overlay Entry on Volatility Shock",
      group = grpEvent
 )
 
@@ -292,18 +298,18 @@ volSlowLen = input.int(
 )
 
 volSpikeMax = input.float(
-     1.6, "Max Fast/Slow ATR Ratio",
+     1.11, "Max Fast/Slow ATR Ratio",
      minval = 1.0, maxval = 5.0, step = 0.05, group = grpEvent,
      tooltip = "Overlay entries are skipped while short-term ATR exceeds this multiple of long-term ATR."
 )
 
 useGapFilter = input.bool(
-     true, "Block Overlay Entry After Large Gap",
+     false, "Block Overlay Entry After Large Gap",
      group = grpEvent
 )
 
 gapAtrMax = input.float(
-     1.0, "Max Signal-Bar Gap (ATR)",
+     0.97, "Max Signal-Bar Gap (ATR)",
      minval = 0.1, maxval = 10.0, step = 0.05, group = grpEvent,
      tooltip = "Skips overlay entry when |open - prior close| on the signal bar exceeds this many prior-bar ATRs."
 )
