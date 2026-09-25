@@ -84,7 +84,7 @@ def main():
     venv = SubprocVecEnv([make_env(lp) for lp in log_paths])
     model = PPO(
         "MlpPolicy", venv, seed=args.seed, verbose=0,
-        n_steps=128, batch_size=128, n_epochs=10, learning_rate=3e-4,
+        n_steps=128, batch_size=128, n_epochs=10, learning_rate=1e-3,
         gamma=0.0, gae_lambda=1.0, clip_range=0.2, ent_coef=0.0, normalize_advantage=True,
         policy_kwargs=dict(net_arch=dict(pi=[32], vf=[32]), log_std_init=-0.7),
     )

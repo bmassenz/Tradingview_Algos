@@ -1,17 +1,19 @@
 """Parameter search space: maps a PPO action in [-1, 1]^d to strategy inputs.
 
-Risk budget inputs (the $65 overlay risk cap, 0.25% risk, 25% overlay notional,
-125% gross cap, $26k sizing capital) are account constraints, not tuned.
+Risk budget inputs (100% Core allocation, the $65 overlay risk cap, 0.25% risk,
+25% overlay notional, 125% gross cap, $26k sizing capital) are account constraints,
+not tuned. Allocation is excluded on purpose: with a drawdown-weighted reward the
+optimizer otherwise just shrinks the Core, which trades return for drawdown 1:1
+without improving the signal.
 """
 import math
 import numpy as np
 
 # name, low, high, kind ("int", "float", "log", "bool")
 SPACE = [
-    ("emaLen", 50, 250, "int"),
+    ("emaLen", 50, 300, "int"),
     ("coreTrailPct", 3.0, 20.0, "float"),
     ("coreReentryCooldown", 0, 20, "int"),
-    ("coreAllocationPct", 50.0, 100.0, "float"),
     ("fastLen", 5, 60, "int"),
     ("slowGap", 10, 150, "int"),            # slowLen = fastLen + slowGap
     ("waeBBLen", 10, 60, "int"),

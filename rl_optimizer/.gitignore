@@ -1,3 +1,4 @@
 results/*.jsonl
 results/*_ppo.zip
 results/*.log
+results/aborted/
