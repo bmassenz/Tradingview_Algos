@@ -72,7 +72,7 @@ def table(per):
         for w in ("IS", "OOS", "HOLDOUT", "FULL"):
             m = per[s][w]
             rows.append(dict(asset=s, window=w, pnl_per_yr=round(m["pnl_annual"]), sharpe=round(m["sharpe"], 2),
-                             sortino=round(m["sortino"], 2), max_dd_pct=round(100 * m["max_dd"], 1),
+                             sortino=round(m["sortino"], 2), max_dd_pct=round(100 * m["max_dd"], 1), tv_dd_pct=round(100 * m["tv_max_dd"], 1),
                              win_rate=round(100 * m["win_rate"], 1), pf=round(m["pf"], 2), trades=m["trades"],
                              ov_campaigns=m["overlay_campaigns"], ov_pnl=round(m["overlay_pnl"]),
                              ov_pf=round(m["overlay_pf"], 2)))

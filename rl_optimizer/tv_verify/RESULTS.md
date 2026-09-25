@@ -105,3 +105,24 @@ Growth and decline) as a percent of initial capital.
   was autosaving while the runner worked in it, and the account was also in use shortly before the
   session. The saved script "Trend-Core WAE Equity Basket v6" still exists in the account, so it can
   be re-added, but its per-layout input settings could not be recovered from here.
+
+## Follow-up: the drawdown difference is reconciled
+
+The gap is a definition difference, and the Python replica now reproduces TradingView's number.
+TradingView's "Max drawdown" takes its peak from closed-trade equity only, takes its trough from
+closed-trade equity plus any open loss at the bar's low, and never counts open profit. The Python
+figure marks every open position to market at each close, so profit that is given back before a
+trade closes counts as drawdown there. Both are correct for what they measure; the Python figure is
+the larger and more conservative one, and it is what the G3 gate in `../README.md` uses.
+
+Recomputing the Python drawdown with TradingView's definition (`metrics.py`, `tv_max_dd`):
+
+| Symbol | TradingView | Python, TradingView definition | Python, marked to market |
+|---|---|---|---|
+| SPY | 2,879 USD (11.07% of capital) | 2,886 USD (11.1%) | 6,487 USD (24.9%) |
+| QQQ | 4,846 USD (18.64%) | 4,862 USD (18.7%) | 9,267 USD (35.6%) |
+| SMH | 7,039 USD (27.07%) | 7,046 USD (27.1%) | 12,395 USD (47.7%) |
+| IWM | 5,909 USD (22.73%) | 5,902 USD (22.7%) | 10,270 USD (39.5%) |
+
+With trade counts exact, net profit within 0.6%, and drawdown within 0.3% under a common
+definition, the Pine script and the Python replica are executing the same strategy on the same data.
