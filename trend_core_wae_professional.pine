@@ -2,20 +2,33 @@
 // at https://mozilla.org/MPL/2.0/
 //
 // Trend-Core WAE Professional
-// Long-only trend core plus one three-tier momentum overlay campaign.
-// Research/backtest model: confirmed-bar signals, close processing, explicit risk controls.
-// 2026-09-22: Paper sizing fail-closed — overlays require live Core; qty from $65 risk / notional budget only.
+// Long-only trend core plus one three-tier WAE momentum overlay campaign.
+// Research/backtest model for liquid US equity ETFs (validated on SPY, QQQ, SMH, IWM daily).
+//
+// Execution model (audit 2026-09-25):
+// - Signals are evaluated on confirmed bar closes only; orders fill at the NEXT bar's open.
+//   (process_orders_on_close is OFF: a signal computed from a close cannot also trade at that close.)
+// - Protective brackets are submitted together with each entry, so they are live from the fill bar.
+// - The higher-timeframe WAE filter uses only completed HTF bars and no lookahead.
+// - close_entries_rule = "ANY" so every exit closes only the entry it is attached to.
+// - Chart data is split-adjusted by TradingView. Dividends are not included (conservative for ETFs).
+//
+// Default inputs (2026-09-25): selected by a PPO search over SPY, QQQ, SMH and IWM daily bars,
+// each tested independently (in-sample 2008-2019, out-of-sample 2020-2022, untouched holdout
+// 2023-2026), ranked by a cross-asset composite reward averaged over a parameter neighbourhood.
+// See rl_optimizer/README.md. One parameter set, no per-symbol changes.
+// Chart: daily. The weekly WAE needs ~85 weeks of history; load bars from 2006 or earlier.
 //
 // IMPORTANT:
 // - This is a systematic research strategy, not investment advice.
-// - Validate per symbol, venue, liquidity profile, timeframe, and cost model.
 // - For live automation, use broker-native protective orders and broker-authoritative reconciliation.
+//   A split or special distribution while a position is open must be reconciled at the broker.
 
 //@version=6
 strategy(
      "Trend-Core WAE Professional",
      overlay = true,
-     pyramiding = 8,
+     pyramiding = 4,
      initial_capital = 26000,
      currency = currency.USD,
      default_qty_type = strategy.fixed,
@@ -23,11 +36,12 @@ strategy(
      commission_type = strategy.commission.percent,
      commission_value = 0.01,
      slippage = 2,
-     process_orders_on_close = true,
+     process_orders_on_close = false,
      calc_on_every_tick = false,
-     calc_on_order_fills = true,
-     use_bar_magnifier = true,
-     margin_long = 66.67,
+     calc_on_order_fills = false,
+     use_bar_magnifier = false,
+     margin_long = 50,
+     close_entries_rule = "ANY",
      fill_orders_on_standard_ohlc = true
 )
 
@@ -38,12 +52,19 @@ string grpCore    = "1. Core Trend Position"
 string grpSignal  = "2. WAE Signal Filters"
 string grpRisk    = "3. Portfolio and Trade Risk"
 string grpExit    = "4. Overlay Exit Management"
-string grpSession = "5. Trading Window"
-string grpVisual  = "6. Visuals"
+string grpEvent   = "5. Event / Gap Volatility Guards"
+string grpSession = "6. Trading Window"
+string grpVisual  = "7. Visuals"
 
 // ============================================================================
 // Core position inputs
 // ============================================================================
+startDate = input.time(
+     timestamp("2008-01-01T00:00:00"), "Trade From",
+     group = grpCore,
+     tooltip = "No new positions before this date. Earlier bars only warm up indicators."
+)
+
 coreAllocationPct = input.float(
      100.0, "Core Allocation % of Equity",
      minval = 10.0, maxval = 150.0, step = 5.0, group = grpCore,
@@ -51,7 +72,7 @@ coreAllocationPct = input.float(
 )
 
 emaLen = input.int(
-     150, "EMA Trend Length",
+     251, "EMA Trend Length",
      minval = 20, maxval = 500, step = 5, group = grpCore
 )
 
@@ -61,9 +82,15 @@ useEMASlopeFilter = input.bool(
 )
 
 coreTrailPct = input.float(
-     5.0, "Core Trailing Stop %",
+     15.25, "Core Trailing Stop %",
      minval = 1.0, maxval = 30.0, step = 0.25, group = grpCore,
-     tooltip = "Trailing stop is based on the highest high AFTER entry. Gaps can produce a worse exit than this percentage."
+     tooltip = "Trailing stop from the highest high since entry. A gap through the stop fills at the open, which can be worse than this percentage."
+)
+
+coreReentryCooldown = input.int(
+     12, "Core Re-entry Cooldown (bars)",
+     minval = 0, maxval = 60, group = grpCore,
+     tooltip = "Bars to wait after any Core exit before a new Core entry. Reduces stop-out / re-entry whipsaw."
 )
 
 // ============================================================================
@@ -75,50 +102,50 @@ enableOverlay = input.bool(
 )
 
 fastLen = input.int(
-     30, "WAE Fast EMA Length",
+     5, "WAE Fast EMA Length",
      minval = 1, maxval = 250, group = grpSignal
 )
 
 slowLen = input.int(
-     90, "WAE Slow EMA Length",
+     82, "WAE Slow EMA Length",
      minval = 2, maxval = 500, group = grpSignal
 )
 
 waeBBLen = input.int(
-     20, "WAE Explosion Length",
+     10, "WAE Explosion Length",
      minval = 2, maxval = 250, group = grpSignal
 )
 
 waeBBMult = input.float(
-     0.05, "WAE Explosion Threshold (Up/StDev)",
-     minval = 0.01, maxval = 5.0, step = 0.01, group = grpSignal,
-     tooltip = "Normalized WAE: require MACD-hist / StDev(close, explosion length) above this level. Dimensionless."
+     0.0101, "WAE Explosion Threshold (Up/StDev)",
+     minval = 0.001, maxval = 5.0, step = 0.005, group = grpSignal,
+     tooltip = "Normalized WAE: require MACD-hist / StDev(close, explosion length) above this level. Dimensionless, so it transfers across symbols and price levels."
 )
 
 deadMult = input.float(
-     0.02, "WAE Dead-Zone Threshold (Up/StDev)",
-     minval = 0.001, maxval = 5.0, step = 0.01, group = grpSignal,
+     0.0055, "WAE Dead-Zone Threshold (Up/StDev)",
+     minval = 0.0005, maxval = 5.0, step = 0.005, group = grpSignal,
      tooltip = "Normalized dead floor in Up/StDev units. Hist must also clear this and be rising."
 )
 
 useRSIFilter = input.bool(
-     true, "Use RSI Momentum Filter",
+     false, "Use RSI Momentum Filter",
      group = grpSignal
 )
 
 rsiLen = input.int(
-     14, "RSI Length",
+     9, "RSI Length",
      minval = 2, maxval = 100, group = grpSignal
 )
 
 rsiEntryThreshold = input.float(
-     60.0, "Minimum RSI for Overlay Entry",
-     minval = 50.0, maxval = 95.0, step = 0.5, group = grpSignal
+     57.95, "Minimum RSI for Overlay Entry",
+     minval = 40.0, maxval = 95.0, step = 0.5, group = grpSignal
 )
 
 rsiHardExitThreshold = input.float(
-     48.0, "RSI Hard-Exit Threshold",
-     minval = 5.0, maxval = 50.0, step = 0.5, group = grpSignal
+     43.8, "RSI Hard-Exit Threshold",
+     minval = 5.0, maxval = 60.0, step = 0.5, group = grpSignal
 )
 
 useHTFWAE = input.bool(
@@ -126,23 +153,29 @@ useHTFWAE = input.bool(
      group = grpSignal
 )
 
-htfWaeTf = input.timeframe(
-     "D", "Higher-Timeframe WAE",
+htfMode = input.string(
+     "Auto", "Higher-Timeframe Mode",
+     options = ["Auto", "Manual"], group = grpSignal,
+     tooltip = "Auto: intraday chart uses D, daily chart uses W, weekly chart uses M. Lets one setting run on any chart timeframe."
+)
+
+htfManualTf = input.timeframe(
+     "W", "Manual Higher Timeframe",
      group = grpSignal,
-     tooltip = "Must be higher than the chart timeframe. The script uses the last completed HTF bar to avoid live/historical inconsistency."
+     tooltip = "Used only in Manual mode. Must be higher than the chart timeframe."
 )
 
 // ============================================================================
 // Portfolio and trade-risk inputs
 // ============================================================================
 atrLen = input.int(
-     21, "ATR Length",
+     12, "ATR Length",
      minval = 1, maxval = 250, group = grpRisk
 )
 
 atrStopMult = input.float(
-     1.5, "Initial Overlay Stop: ATR Multiplier",
-     minval = 0.25, maxval = 10.0, step = 0.1, group = grpRisk
+     4.0, "Initial Overlay Stop: ATR Multiplier",
+     minval = 0.25, maxval = 10.0, step = 0.05, group = grpRisk
 )
 
 overlayRiskPct = input.float(
@@ -154,7 +187,7 @@ overlayRiskPct = input.float(
 maxOverlayRiskCash = input.float(
      65.0, "Maximum Overlay Risk $",
      minval = 1.0, step = 5.0, group = grpRisk,
-     tooltip = "Caps risk-based sizing even if equity percentage permits more. Default ~0.25% of $26k paper."
+     tooltip = "Caps risk-based sizing even if the equity percentage permits more. Default ~0.25% of $26k paper."
 )
 
 maxOverlayNotionalPct = input.float(
@@ -163,50 +196,51 @@ maxOverlayNotionalPct = input.float(
 )
 
 maxGrossExposurePct = input.float(
-     100.0, "Maximum Combined Gross Exposure % of Equity",
-     minval = 25.0, maxval = 300.0, step = 5.0, group = grpRisk,
-     tooltip = "Blocks new overlays when the Core's cost-basis notional exceeds this % of sizing equity (+1% tolerance). Overlay notional is additive, capped separately by Maximum Overlay Notional %."
+     125.0, "Maximum Combined Gross Exposure % of Equity",
+     minval = 25.0, maxval = 200.0, step = 5.0, group = grpRisk,
+     tooltip = "Hard cap on Core cost basis plus new overlay notional. 125% stays well inside Reg T 2:1 overnight margin (margin_long = 50)."
 )
 
 paperSizingCapital = input.float(
      26000.0, "Paper / Sizing Capital $",
      minval = 1000.0, step = 500.0, group = grpRisk,
-     tooltip = "Account size used for Core/Overlay qty when fixed paper sizing is ON. Set to Bryan paper equity ($26k)."
+     tooltip = "Account size used for Core/Overlay qty when fixed paper sizing is ON."
 )
 
 useFixedPaperSizing = input.bool(
      true, "Use Fixed Paper Sizing Capital",
      group = grpRisk,
-     tooltip = "ON (paper dry-run): size from Paper/Sizing Capital $, not strategy.equity growth. OFF: use strategy.equity (backtest compounding)."
+     tooltip = "ON: size from Paper/Sizing Capital $, not strategy.equity growth. OFF: use strategy.equity (compounding)."
 )
 
 qtyIncrement = input.float(
      1.0, "Quantity Increment",
      minval = 0.000001, step = 0.000001, group = grpRisk,
-     tooltip = "Use 1 for whole-share or whole-contract trading. Set the broker-supported fractional increment only when applicable."
+     tooltip = "Use 1 for whole-share trading. Set the broker-supported fractional increment only when applicable."
 )
 
 minOverlayQty = input.float(
-     1.0, "Minimum Overlay Quantity",
-     minval = 0.000001, step = 0.000001, group = grpRisk
+     3.0, "Minimum Overlay Quantity",
+     minval = 0.000001, step = 0.000001, group = grpRisk,
+     tooltip = "Three tiers need at least three increments."
 )
 
 // ============================================================================
 // Overlay exits
 // ============================================================================
 tier1R = input.float(
-     1.0, "Tier 1 Target (R)",
-     minval = 0.25, maxval = 20.0, step = 0.25, group = grpExit
+     0.5, "Tier 1 Target (R)",
+     minval = 0.25, maxval = 20.0, step = 0.05, group = grpExit
 )
 
 tier2R = input.float(
-     2.0, "Tier 2 Target (R)",
-     minval = 0.5, maxval = 30.0, step = 0.25, group = grpExit
+     0.75, "Tier 2 Target (R)",
+     minval = 0.5, maxval = 30.0, step = 0.05, group = grpExit
 )
 
 tier3R = input.float(
-     4.0, "Tier 3 Maximum Target (R)",
-     minval = 1.0, maxval = 50.0, step = 0.25, group = grpExit
+     1.25, "Tier 3 Maximum Target (R)",
+     minval = 1.0, maxval = 50.0, step = 0.05, group = grpExit
 )
 
 useBreakEven = input.bool(
@@ -215,28 +249,69 @@ useBreakEven = input.bool(
 )
 
 breakEvenTriggerR = input.float(
-     0.75, "Breakeven Trigger (R)",
-     minval = 0.25, maxval = 10.0, step = 0.25, group = grpExit
+     1.62, "Breakeven Trigger (R)",
+     minval = 0.1, maxval = 10.0, step = 0.05, group = grpExit
 )
 
 trailStartR = input.float(
-     2.0, "Tier 3 ATR Trail Begins at (R)",
-     minval = 0.5, maxval = 20.0, step = 0.25, group = grpExit
+     1.11, "Tier 3 ATR Trail Begins at (R)",
+     minval = 0.25, maxval = 20.0, step = 0.05, group = grpExit
 )
 
 atrTrailMult = input.float(
-     1.0, "Tier 3 ATR Trail Multiplier",
-     minval = 0.25, maxval = 10.0, step = 0.1, group = grpExit
+     0.5, "Tier 3 ATR Trail Multiplier",
+     minval = 0.25, maxval = 10.0, step = 0.05, group = grpExit
 )
 
 hardExitOnMomentumLoss = input.bool(
-     true, "Exit Remaining Overlay on Momentum Loss",
+     false, "Exit Remaining Overlay on Momentum Loss",
      group = grpExit
 )
 
 hardExitOnTrendLoss = input.bool(
      true, "Exit Remaining Overlay Below EMA",
      group = grpExit
+)
+
+flattenOverlayWithoutCore = input.bool(
+     true, "Exit Overlay When Core Is Flat",
+     group = grpExit,
+     tooltip = "Fail-closed: an overlay never survives as an orphan after the Core trailing stop fills."
+)
+
+// ============================================================================
+// Event / gap volatility guards (earnings-season and macro shock proxies)
+// ============================================================================
+useVolShockFilter = input.bool(
+     false, "Block Overlay Entry on Volatility Shock",
+     group = grpEvent
+)
+
+volFastLen = input.int(
+     5, "Shock ATR Fast Length",
+     minval = 1, maxval = 50, group = grpEvent
+)
+
+volSlowLen = input.int(
+     63, "Shock ATR Slow Length",
+     minval = 10, maxval = 250, group = grpEvent
+)
+
+volSpikeMax = input.float(
+     1.11, "Max Fast/Slow ATR Ratio",
+     minval = 1.0, maxval = 5.0, step = 0.05, group = grpEvent,
+     tooltip = "Overlay entries are skipped while short-term ATR exceeds this multiple of long-term ATR."
+)
+
+useGapFilter = input.bool(
+     false, "Block Overlay Entry After Large Gap",
+     group = grpEvent
+)
+
+gapAtrMax = input.float(
+     0.97, "Max Signal-Bar Gap (ATR)",
+     minval = 0.1, maxval = 10.0, step = 0.05, group = grpEvent,
+     tooltip = "Skips overlay entry when |open - prior close| on the signal bar exceeds this many prior-bar ATRs."
 )
 
 // ============================================================================
@@ -250,7 +325,7 @@ useSessionFilter = input.bool(
 tradeSession = input.session(
      "0930-1555", "Trading Session",
      group = grpSession,
-     tooltip = "Exchange timezone. For daily or higher charts, normally leave the session filter disabled."
+     tooltip = "Exchange timezone. Intraday charts only. Leave disabled on daily or higher charts."
 )
 
 flatAtSessionEnd = input.bool(
@@ -266,25 +341,14 @@ showEMA = input.bool(true, "Plot EMA", group = grpVisual)
 showStops = input.bool(true, "Plot Stops and Targets", group = grpVisual)
 showSignals = input.bool(true, "Plot Entry Markers", group = grpVisual)
 showStatusTable = input.bool(true, "Show Status Table", group = grpVisual)
-showWaeDebug = input.bool(true, "Plot WAE Debug (Up / Explosion / Dead Zone)", group = grpVisual)
-
-phase1OverlayProof = input.bool(
-     false, "Phase1 Overlay Proof Mode (ease WAE only)",
-     group = grpSignal,
-     tooltip = "TEMPORARY: lowers effective explosion and dead-zone multipliers so OverlayT1/T2/T3 can be integrity-tested. Leave OFF for research defaults."
-)
-proofExplosionMult = input.float(
-     0.08, "Proof Mode Explosion Threshold (Up/StDev)",
-     minval = 0.01, maxval = 2.0, step = 0.01, group = grpSignal
-)
-proofDeadMult = input.float(
-     0.02, "Proof Mode Dead-Zone Threshold (Up/StDev)",
-     minval = 0.001, maxval = 2.0, step = 0.01, group = grpSignal
-)
+showWaeDebug = input.bool(false, "Data Window Diagnostics", group = grpVisual)
 
 // ============================================================================
-// Validation
+// Higher timeframe selection and validation
 // ============================================================================
+string htfAutoTf = timeframe.in_seconds() < 86400 ? "D" : timeframe.in_seconds() < 604800 ? "W" : "M"
+string htfWaeTf = htfMode == "Auto" ? htfAutoTf : htfManualTf
+
 if fastLen >= slowLen
     runtime.error("WAE Fast EMA Length must be less than WAE Slow EMA Length.")
 
@@ -293,6 +357,9 @@ if tier1R >= tier2R
 
 if tier2R >= tier3R
     runtime.error("Tier 2 target must be lower than Tier 3 target.")
+
+if volFastLen >= volSlowLen
+    runtime.error("Shock ATR Fast Length must be less than Shock ATR Slow Length.")
 
 if useHTFWAE and timeframe.in_seconds(htfWaeTf) <= timeframe.in_seconds()
     runtime.error("Higher-Timeframe WAE must be set to a timeframe higher than the chart timeframe.")
@@ -303,10 +370,8 @@ if useHTFWAE and timeframe.in_seconds(htfWaeTf) <= timeframe.in_seconds()
 f_roundDownToIncrement(float value, float increment) =>
     increment > 0.0 ? math.floor(value / increment) * increment : na
 
-// Paper dry-run: size off fixed capital so strategy.equity / $400k history cannot inflate alert qty.
 f_sizingEquity() =>
     useFixedPaperSizing ? paperSizingCapital : strategy.equity
-
 
 f_hasOpenTrade(string entryId) =>
     bool found = false
@@ -331,33 +396,19 @@ f_openTradeSize(string entryId) =>
                 qtySum += math.abs(strategy.opentrades.size(i))
     qtySum
 
-// Core exposure at cost basis (entry price x open Core qty). Mark-to-market would
-// block every overlay once a 100%-allocated Core gains >1% against fixed paper capital.
+// Core exposure at cost basis (entry price x open Core qty).
 f_coreCostBasisCash() =>
     float corePx = f_openTradePrice("Core")
     na(corePx) ? 0.0 : f_openTradeSize("Core") * corePx * math.max(syminfo.pointvalue, 0.00000001)
 
-// Effective normalized WAE thresholds (Up/StDev). Proof mode eases chart + HTF together.
-float waeBBMultEff = phase1OverlayProof ? proofExplosionMult : waeBBMult
-float deadMultEff = phase1OverlayProof ? proofDeadMult : deadMult
-
 f_waeLongOK() =>
     float macd = ta.ema(close, fastLen) - ta.ema(close, slowLen)
     float hist = macd - macd[1]
-    float up = math.max(hist, 0.0)
     float dev = math.max(ta.stdev(close, waeBBLen), syminfo.mintick)
-    float upNorm = up / dev
-    float prevDev = math.max(ta.stdev(close, waeBBLen)[1], syminfo.mintick)
-    float upNormPrev = math.max(hist[1], 0.0) / prevDev
+    float upNorm = math.max(hist, 0.0) / dev
+    float upNormPrev = math.max(hist[1], 0.0) / math.max(dev[1], syminfo.mintick)
     bool ready = not na(upNorm) and not na(upNormPrev)
-    ready and upNorm > waeBBMultEff and upNorm > deadMultEff and upNorm > upNormPrev
-
-f_waeDownDominant() =>
-    float macd = ta.ema(close, fastLen) - ta.ema(close, slowLen)
-    float hist = macd - macd[1]
-    float up = math.max(hist, 0.0)
-    float down = math.max(-hist, 0.0)
-    down > up and down > down[1]
+    ready and upNorm > waeBBMult and upNorm > deadMult and upNorm > upNormPrev
 
 // ============================================================================
 // Market, trend, WAE, and session calculations
@@ -375,30 +426,36 @@ float waeUp = math.max(macdHist, 0.0)
 float waeDown = math.max(-macdHist, 0.0)
 float waeDev = math.max(ta.stdev(close, waeBBLen), syminfo.mintick)
 float waeUpNorm = waeUp / waeDev
-float waeDownNorm = waeDown / waeDev
-float waeUpNormPrev = math.max(macdHist[1], 0.0) / math.max(ta.stdev(close, waeBBLen)[1], syminfo.mintick)
-// Keep names Explosion / Dead Zone in Data Window as normalized thresholds for continuity
-float explosion = waeBBMultEff
-float deadZone = deadMultEff
+float waeUpNormPrev = math.max(macdHist[1], 0.0) / math.max(waeDev[1], syminfo.mintick)
 
 bool waeLongOK = not na(waeUpNorm) and not na(waeUpNormPrev) and
-     waeUpNorm > explosion and
-     waeUpNorm > deadZone and
+     waeUpNorm > waeBBMult and
+     waeUpNorm > deadMult and
      waeUpNorm > waeUpNormPrev
 
 bool waeDownDominant = not na(waeDown) and not na(waeDown[1]) and waeDown > waeUp and waeDown > waeDown[1]
 
+// Non-repainting HTF request without lookahead: historical bars read the previous
+// completed HTF value via the outer [1]; realtime bars read it via the inner [1].
+int htfRt = barstate.isrealtime ? 1 : 0
 bool htfWaeLongOK = request.security(
      syminfo.tickerid,
      htfWaeTf,
-     f_waeLongOK()[1],
+     f_waeLongOK()[htfRt],
      gaps = barmerge.gaps_off,
-     lookahead = barmerge.lookahead_on
-)
+     lookahead = barmerge.lookahead_off
+)[barstate.isrealtime ? 0 : 1]
+
+// Event / gap guards (evaluated on the signal bar, using prior-bar ATR for the gap).
+float volRatio = ta.atr(volFastLen) / ta.atr(volSlowLen)
+bool volShockOK = not useVolShockFilter or (not na(volRatio) and volRatio <= volSpikeMax)
+float gapAtr = math.abs(open - close[1]) / atrValue[1]
+bool gapOK = not useGapFilter or (not na(gapAtr) and gapAtr <= gapAtrMax)
 
 bool inConfiguredSession = not na(time(timeframe.period, tradeSession))
 bool tradingWindowOK = not useSessionFilter or inConfiguredSession
 bool confirmedBar = barstate.isconfirmed
+bool inDateRange = time >= startDate
 
 // ============================================================================
 // Actual position-state detection
@@ -415,28 +472,24 @@ bool overlayOpen = tier1Open or tier2Open or tier3Open
 var bool coreOrderPending = false
 var int coreOrderBar = na
 var int coreEntryBar = na
+var int coreCooldownUntil = na
 var float corePeak = na
 var float coreStop = na
+
+string coreStopAlert = "{\"event\":\"core_stop\",\"symbol\":\"{{ticker}}\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
 
 if coreOpen
     coreOrderPending := false
 
+    // Peak starts at the fill; the fill bar's high occurs after the opening fill.
     if not coreOpen[1]
         coreEntryBar := bar_index
-        corePeak := f_openTradePrice("Core")
-        coreStop := corePeak * (1.0 - coreTrailPct / 100.0)
-
-    if bar_index > nz(coreEntryBar, bar_index)
+        corePeak := math.max(f_openTradePrice("Core"), high)
+    else
         corePeak := math.max(nz(corePeak, high), high)
-        coreStop := corePeak * (1.0 - coreTrailPct / 100.0)
+    coreStop := corePeak * (1.0 - coreTrailPct / 100.0)
 
-    strategy.exit(
-         "CoreProtectiveStop",
-         from_entry = "Core",
-         stop = coreStop,
-         comment = "Core Trailing Stop",
-         alert_message = "{\"event\":\"core_stop\",\"symbol\":\"{{ticker}}\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
+    strategy.exit("CoreProtectiveStop", from_entry = "Core", stop = coreStop, comment = "Core Trailing Stop", alert_message = coreStopAlert)
 
     if confirmedBar and not coreTrendOK
         strategy.close(
@@ -445,6 +498,9 @@ if coreOpen
              alert_message = "{\"event\":\"core_ema_exit\",\"symbol\":\"{{ticker}}\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
         )
 else
+    if coreOpen[1]
+        coreCooldownUntil := bar_index + coreReentryCooldown
+
     if coreOrderPending and bar_index > nz(coreOrderBar, bar_index)
         coreOrderPending := false
 
@@ -453,8 +509,10 @@ else
         coreStop := na
         coreEntryBar := na
 
-// Enter the core only after confirmed trend qualification.
-if confirmedBar and coreTrendOK and not coreOpen and not coreOrderPending
+bool coreCooldownOK = na(coreCooldownUntil) or bar_index >= coreCooldownUntil
+
+// Enter the core only after confirmed trend qualification. Fills at the next open.
+if confirmedBar and inDateRange and coreTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK
     float sizingEq = f_sizingEquity()
     float rawCoreQty = (sizingEq * coreAllocationPct / 100.0) / (close * pointValue)
     float coreQty = f_roundDownToIncrement(rawCoreQty, qtyIncrement)
@@ -467,6 +525,8 @@ if confirmedBar and coreTrendOK and not coreOpen and not coreOrderPending
              comment = "Core Trend Entry",
              alert_message = "{\"event\":\"core_entry\",\"symbol\":\"{{ticker}}\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
         )
+        // Bracket submitted with the entry so the fill bar is protected.
+        strategy.exit("CoreProtectiveStop", from_entry = "Core", stop = close * (1.0 - coreTrailPct / 100.0), comment = "Core Trailing Stop", alert_message = coreStopAlert)
         coreOrderPending := true
         coreOrderBar := bar_index
 
@@ -489,12 +549,10 @@ var float overlayT2Target = na
 var float overlayT3Target = na
 var float overlayT3Stop = na
 
-bool overlayCampaignLive = overlayOpen or overlayOrderPending
-
-// Reset the campaign only after all overlay trades are demonstrably flat.
+// Reset the campaign as soon as all overlay trades are demonstrably flat.
 if overlayOpen
     overlayOrderPending := false
-else if overlayOrderPending and bar_index > nz(overlayOrderBar, bar_index)
+else if not overlayOrderPending or bar_index > nz(overlayOrderBar, bar_index)
     overlayOrderPending := false
     overlayHardExitSent := false
     tier3BreakevenArmed := false
@@ -509,6 +567,8 @@ else if overlayOrderPending and bar_index > nz(overlayOrderBar, bar_index)
     overlayT3Target := na
     overlayT3Stop := na
 
+bool overlayCampaignLive = overlayOpen or overlayOrderPending
+
 // ============================================================================
 // Overlay entry sizing and order placement
 // ============================================================================
@@ -516,11 +576,12 @@ bool rsiLongOK = not useRSIFilter or rsiValue >= rsiEntryThreshold
 bool htfLongOK = not useHTFWAE or htfWaeLongOK
 bool slopeLongOK = not useEMASlopeFilter or emaSlopeUp
 
-// Fail-closed: strategy.opentrades Core AND live net long required (blocks orphan overlays after paper Core void).
+// Fail-closed: Core trade open AND live net long required.
 bool corePositionLive = coreOpen and strategy.position_size > 0
 
 bool overlayLongSignal =
      confirmedBar and
+     inDateRange and
      enableOverlay and
      tradingWindowOK and
      corePositionLive and
@@ -529,127 +590,67 @@ bool overlayLongSignal =
      rsiLongOK and
      htfLongOK and
      slopeLongOK and
+     volShockOK and
+     gapOK and
      not overlayCampaignLive
 
-// Shadow sizing (always computed for Data Window — does not place orders)
-// LOCKED paper: risk $ = min(equity*overlayRiskPct, maxOverlayRiskCash);
-// notional cap = sizingEq * maxOverlayNotionalPct; never Core-sized qty.
-float _dbgRiskDist = math.max(atrValue * atrStopMult, syminfo.mintick)
-float _dbgSizingEq = f_sizingEquity()
-float _dbgRiskCash = math.min(_dbgSizingEq * overlayRiskPct / 100.0, maxOverlayRiskCash)
-float _dbgQtyRisk = _dbgRiskDist > 0.0 ? _dbgRiskCash / (_dbgRiskDist * pointValue) : na
-float _dbgOverlayBudget = _dbgSizingEq * maxOverlayNotionalPct / 100.0
-float _dbgQtyNotional = close > 0.0 ? _dbgOverlayBudget / (close * pointValue) : na
-// Gross: Core cost-basis notional only. Overlay budget is additive up to maxOverlayNotionalPct (so Core@100% still allows small overlay).
-float _dbgCoreExp = f_coreCostBasisCash()
-bool _dbgCoreOverBudget = _dbgCoreExp > _dbgSizingEq * maxGrossExposurePct / 100.0 * 1.01
-float _dbgQty = phase1OverlayProof ? (3.0 * qtyIncrement) : f_roundDownToIncrement(math.min(nz(_dbgQtyRisk), nz(_dbgQtyNotional)), qtyIncrement)
-plot(showWaeDebug ? _dbgQtyRisk : na, "DBG qtyByRisk", display = display.data_window)
-plot(showWaeDebug ? _dbgQtyNotional : na, "DBG qtyByNotional", display = display.data_window)
-plot(showWaeDebug ? _dbgQty : na, "DBG overlayQtyShadow", display = display.data_window)
-plot(showWaeDebug ? _dbgOverlayBudget : na, "DBG overlayBudget$", display = display.data_window)
-plot(showWaeDebug ? _dbgCoreExp : na, "DBG coreExposure$", display = display.data_window)
-plot(showWaeDebug ? _dbgRiskCash : na, "DBG permittedRisk$", display = display.data_window)
+string exitAlertT1 = "{\"event\":\"overlay_t1_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
+string exitAlertT2 = "{\"event\":\"overlay_t2_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
+string exitAlertT3 = "{\"event\":\"overlay_t3_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
 
+// Sizing: risk budget and notional budget from sizing capital only, further capped by
+// the remaining gross-exposure room above the Core's cost basis. Never sized off Core qty.
+float sizingEqNow = f_sizingEquity()
+float plannedRiskDistance = math.max(nz(atrValue, 0.0) * atrStopMult, syminfo.mintick)
+float permittedRiskCash = math.min(sizingEqNow * overlayRiskPct / 100.0, maxOverlayRiskCash)
+float coreCostCash = f_coreCostBasisCash()
+float grossRoomCash = math.max(sizingEqNow * maxGrossExposurePct / 100.0 - coreCostCash, 0.0)
+float overlayBudgetCash = math.min(sizingEqNow * maxOverlayNotionalPct / 100.0, grossRoomCash)
+float rawQtyByRisk = permittedRiskCash / (plannedRiskDistance * pointValue)
+float rawQtyByNotional = close > 0.0 ? overlayBudgetCash / (close * pointValue) : 0.0
+float overlayQty = f_roundDownToIncrement(math.min(rawQtyByRisk, rawQtyByNotional), qtyIncrement)
+float tier1Qty = f_roundDownToIncrement(overlayQty / 3.0, qtyIncrement)
+float tier2Qty = tier1Qty
+float tier3Qty = overlayQty - tier1Qty - tier2Qty
+bool overlaySizeOK = overlayQty >= minOverlayQty and tier1Qty >= qtyIncrement and tier3Qty >= qtyIncrement
 
-// --- Overlay signal / sizing diagnostics (Data Window + markers) ---
-plot(showWaeDebug and confirmedBar ? (coreOpen ? 1.0 : 0.0) : na, "DBG coreOpen", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (corePositionLive ? 1.0 : 0.0) : na, "DBG corePositionLive", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (coreTrendOK ? 1.0 : 0.0) : na, "DBG coreTrendOK", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (waeLongOK ? 1.0 : 0.0) : na, "DBG waeLongOK", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (rsiLongOK ? 1.0 : 0.0) : na, "DBG rsiLongOK", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (htfLongOK ? 1.0 : 0.0) : na, "DBG htfLongOK", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (slopeLongOK ? 1.0 : 0.0) : na, "DBG slopeLongOK", display = display.data_window)
-plot(showWaeDebug and confirmedBar ? (overlayLongSignal ? 1.0 : 0.0) : na, "DBG overlayLongSignal", display = display.data_window)
-plotshape(overlayLongSignal, title = "Overlay Signal", text = "OV", style = shape.labelup, location = location.belowbar, color = color.aqua, textcolor = color.black, size = size.tiny)
-
-if overlayLongSignal
+if overlayLongSignal and overlaySizeOK
     float plannedEntry = close
-    float plannedRiskDistance = math.max(nz(atrValue, 0.0) * atrStopMult, syminfo.mintick)
-    float sizingEq = f_sizingEquity()
-    float riskCashByPct = sizingEq * overlayRiskPct / 100.0
-    float permittedRiskCash = math.min(riskCashByPct, maxOverlayRiskCash)
-    float overlayBudgetCash = sizingEq * maxOverlayNotionalPct / 100.0
+    overlayEntryPrice := plannedEntry
+    overlayRiskDistance := plannedRiskDistance
+    overlayInitialStop := plannedEntry - plannedRiskDistance
+    overlayT1Target := plannedEntry + plannedRiskDistance * tier1R
+    overlayT2Target := plannedEntry + plannedRiskDistance * tier2R
+    overlayT3Target := plannedEntry + plannedRiskDistance * tier3R
+    overlayT3Stop := overlayInitialStop
 
-    float rawQtyByRisk = plannedRiskDistance > 0.0 ? permittedRiskCash / (plannedRiskDistance * pointValue) : 0.0
-    float rawQtyByNotional = plannedEntry > 0.0 ? overlayBudgetCash / (plannedEntry * pointValue) : 0.0
+    overlayOrderPending := true
+    overlayHardExitSent := false
+    tier3BreakevenArmed := false
+    tier3TrailingActive := false
+    overlayOrderBar := bar_index
+    overlayEntryBar := bar_index
 
-    // Fail-closed: never size overlays off Core qty / strategy.equity growth / residual gross after Core.
-    float rawOverlayQty = math.min(rawQtyByRisk, rawQtyByNotional)
-    float overlayQty = phase1OverlayProof ? (3.0 * qtyIncrement) : f_roundDownToIncrement(rawOverlayQty, qtyIncrement)
+    string stopStr = str.tostring(overlayInitialStop, "#.####")
+    string riskStr = str.tostring(permittedRiskCash, "#.##")
+    string sizeEqStr = str.tostring(sizingEqNow, "#.##")
+    string entryTail = ",\"stop\":\"" + stopStr + "\",\"risk_cash\":\"" + riskStr + "\",\"sizing_equity\":\"" + sizeEqStr + "\",\"paper\":true,\"core_required\":true}"
+    string entryHead = "\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\""
 
-    // Guard against an oversized Core (e.g. duplicate fills), not against Core appreciation.
-    float coreExposureCash = f_coreCostBasisCash()
-    bool coreOverGross = coreExposureCash > sizingEq * maxGrossExposurePct / 100.0 * 1.01
-    float maxSharesTotal = f_roundDownToIncrement(overlayBudgetCash / (plannedEntry * pointValue), qtyIncrement)
-    // Ceiling split: Tier 3 takes the remainder, so it can hold up to ceil(total/3) + one increment.
-    float maxSharesPerTier = math.max(qtyIncrement, math.ceil(maxSharesTotal / 3.0 / qtyIncrement) * qtyIncrement)
+    strategy.entry("OverlayT1", strategy.long, qty = tier1Qty, comment = "Overlay Tier 1 Entry", alert_message = "{\"event\":\"overlay_t1_entry\"," + entryHead + entryTail)
+    strategy.entry("OverlayT2", strategy.long, qty = tier2Qty, comment = "Overlay Tier 2 Entry", alert_message = "{\"event\":\"overlay_t2_entry\"," + entryHead + entryTail)
+    strategy.entry("OverlayT3", strategy.long, qty = tier3Qty, comment = "Overlay Tier 3 Entry", alert_message = "{\"event\":\"overlay_t3_entry\"," + entryHead + entryTail)
 
-    if not coreOverGross and overlayQty >= minOverlayQty and overlayQty <= maxSharesTotal + qtyIncrement
-        float tier1Qty = phase1OverlayProof ? qtyIncrement : f_roundDownToIncrement(overlayQty / 3.0, qtyIncrement)
-        float tier2Qty = phase1OverlayProof ? qtyIncrement : f_roundDownToIncrement(overlayQty / 3.0, qtyIncrement)
-        float tier3Qty = phase1OverlayProof ? qtyIncrement : (overlayQty - tier1Qty - tier2Qty)
-
-        bool tiersOk =
-             tier1Qty >= qtyIncrement and tier2Qty >= qtyIncrement and tier3Qty >= qtyIncrement and
-             tier1Qty <= maxSharesPerTier + qtyIncrement and
-             tier2Qty <= maxSharesPerTier + qtyIncrement and
-             tier3Qty <= maxSharesPerTier + qtyIncrement and
-             tier1Qty * plannedEntry * pointValue <= overlayBudgetCash and
-             tier2Qty * plannedEntry * pointValue <= overlayBudgetCash and
-             tier3Qty * plannedEntry * pointValue <= overlayBudgetCash
-
-        if tiersOk
-            overlayEntryPrice := plannedEntry
-            overlayRiskDistance := plannedRiskDistance
-            overlayInitialStop := plannedEntry - plannedRiskDistance
-            overlayT1Target := plannedEntry + plannedRiskDistance * tier1R
-            overlayT2Target := plannedEntry + plannedRiskDistance * tier2R
-            overlayT3Target := plannedEntry + plannedRiskDistance * tier3R
-            overlayT3Stop := overlayInitialStop
-
-            overlayOrderPending := true
-            overlayHardExitSent := false
-            tier3BreakevenArmed := false
-            tier3TrailingActive := false
-            overlayOrderBar := bar_index
-            overlayEntryBar := bar_index
-
-            string stopStr = str.tostring(overlayInitialStop, "#.####")
-            string riskStr = str.tostring(permittedRiskCash, "#.##")
-            string sizeEqStr = str.tostring(sizingEq, "#.##")
-
-            strategy.entry(
-                 "OverlayT1",
-                 strategy.long,
-                 qty = tier1Qty,
-                 comment = "Overlay Tier 1 Entry",
-                 alert_message = "{\"event\":\"overlay_t1_entry\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\",\"stop\":\"" + stopStr + "\",\"risk_cash\":\"" + riskStr + "\",\"sizing_equity\":\"" + sizeEqStr + "\",\"paper\":true,\"core_required\":true}"
-            )
-
-            strategy.entry(
-                 "OverlayT2",
-                 strategy.long,
-                 qty = tier2Qty,
-                 comment = "Overlay Tier 2 Entry",
-                 alert_message = "{\"event\":\"overlay_t2_entry\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\",\"stop\":\"" + stopStr + "\",\"risk_cash\":\"" + riskStr + "\",\"sizing_equity\":\"" + sizeEqStr + "\",\"paper\":true,\"core_required\":true}"
-            )
-
-            strategy.entry(
-                 "OverlayT3",
-                 strategy.long,
-                 qty = tier3Qty,
-                 comment = "Overlay Tier 3 Entry",
-                 alert_message = "{\"event\":\"overlay_t3_entry\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\",\"stop\":\"" + stopStr + "\",\"risk_cash\":\"" + riskStr + "\",\"sizing_equity\":\"" + sizeEqStr + "\",\"paper\":true,\"core_required\":true}"
-            )
+    // Brackets submitted with the entries so the fill bar is protected.
+    strategy.exit("ExitT1", from_entry = "OverlayT1", stop = overlayInitialStop, limit = overlayT1Target, comment = "Overlay Tier 1 Exit", alert_message = exitAlertT1)
+    strategy.exit("ExitT2", from_entry = "OverlayT2", stop = overlayInitialStop, limit = overlayT2Target, comment = "Overlay Tier 2 Exit", alert_message = exitAlertT2)
+    strategy.exit("ExitT3", from_entry = "OverlayT3", stop = overlayT3Stop, limit = overlayT3Target, comment = "Overlay Tier 3 Exit", alert_message = exitAlertT3)
 
 // ============================================================================
 // Overlay protective exits and campaign management
 // ============================================================================
 if overlayCampaignLive and not na(overlayEntryPrice) and not overlayHardExitSent
-    bool canAdvanceOverlayManagement = bar_index > nz(overlayEntryBar, bar_index)
-
-    if tier3Open and canAdvanceOverlayManagement
+    if tier3Open and bar_index > nz(overlayEntryBar, bar_index)
         float breakevenTriggerPrice = overlayEntryPrice + overlayRiskDistance * breakEvenTriggerR
         float trailTriggerPrice = overlayEntryPrice + overlayRiskDistance * trailStartR
 
@@ -661,68 +662,33 @@ if overlayCampaignLive and not na(overlayEntryPrice) and not overlayHardExitSent
             tier3TrailingActive := true
 
         if tier3TrailingActive
-            float nextTrailStop = high - atrValue * atrTrailMult
-            overlayT3Stop := math.max(overlayT3Stop, nextTrailStop)
+            overlayT3Stop := math.max(overlayT3Stop, high - atrValue * atrTrailMult)
 
-    // Reissue price-based exits each bar. These are linked to specific tier IDs.
-    strategy.exit(
-         "ExitT1",
-         from_entry = "OverlayT1",
-         stop = overlayInitialStop,
-         limit = overlayT1Target,
-         comment = "Overlay Tier 1 Exit",
-         alert_message = "{\"event\":\"overlay_t1_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
+    // Reissue brackets only for tiers that are still open (no stale exit orders).
+    if tier1Open
+        strategy.exit("ExitT1", from_entry = "OverlayT1", stop = overlayInitialStop, limit = overlayT1Target, comment = "Overlay Tier 1 Exit", alert_message = exitAlertT1)
+    if tier2Open
+        strategy.exit("ExitT2", from_entry = "OverlayT2", stop = overlayInitialStop, limit = overlayT2Target, comment = "Overlay Tier 2 Exit", alert_message = exitAlertT2)
+    if tier3Open
+        strategy.exit("ExitT3", from_entry = "OverlayT3", stop = overlayT3Stop, limit = overlayT3Target, comment = tier3TrailingActive ? "Overlay Tier 3 ATR Trail" : "Overlay Tier 3 Exit", alert_message = exitAlertT3)
 
-    strategy.exit(
-         "ExitT2",
-         from_entry = "OverlayT2",
-         stop = overlayInitialStop,
-         limit = overlayT2Target,
-         comment = "Overlay Tier 2 Exit",
-         alert_message = "{\"event\":\"overlay_t2_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
-
-    strategy.exit(
-         "ExitT3",
-         from_entry = "OverlayT3",
-         stop = overlayT3Stop,
-         limit = overlayT3Target,
-         comment = tier3TrailingActive ? "Overlay Tier 3 ATR Trail" : "Overlay Tier 3 Exit",
-         alert_message = "{\"event\":\"overlay_t3_exit\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
-
-// Hard exit applies only to still-open overlay components.
+// Hard exit applies only to still-open overlay components. Fills at the next open.
 bool trendHardExit = hardExitOnTrendLoss and not coreTrendOK
 bool momentumHardExit = hardExitOnMomentumLoss and (waeDownDominant or rsiValue <= rsiHardExitThreshold)
 bool sessionHardExit = flatAtSessionEnd and useSessionFilter and not inConfiguredSession
+bool orphanHardExit = flattenOverlayWithoutCore and overlayOpen and not coreOpen
 
-bool overlayHardExit = confirmedBar and overlayCampaignLive and not overlayHardExitSent and
-     (trendHardExit or momentumHardExit or sessionHardExit)
+bool overlayHardExit = confirmedBar and overlayOpen and not overlayHardExitSent and
+     (trendHardExit or momentumHardExit or sessionHardExit or orphanHardExit)
 
 if overlayHardExit
     strategy.cancel("ExitT1")
     strategy.cancel("ExitT2")
     strategy.cancel("ExitT3")
-
-    strategy.close(
-         "OverlayT1",
-         comment = "Overlay Hard Exit T1",
-         alert_message = "{\"event\":\"overlay_hard_exit_t1\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
-
-    strategy.close(
-         "OverlayT2",
-         comment = "Overlay Hard Exit T2",
-         alert_message = "{\"event\":\"overlay_hard_exit_t2\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
-
-    strategy.close(
-         "OverlayT3",
-         comment = "Overlay Hard Exit T3",
-         alert_message = "{\"event\":\"overlay_hard_exit_t3\",\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
-    )
-
+    string hardHead = "\"symbol\":\"{{ticker}}\",\"campaign\":\"wae_long\",\"id\":\"{{strategy.order.id}}\",\"action\":\"{{strategy.order.action}}\",\"qty\":\"{{strategy.order.contracts}}\",\"fill_price\":\"{{strategy.order.price}}\"}"
+    strategy.close("OverlayT1", comment = "Overlay Hard Exit T1", alert_message = "{\"event\":\"overlay_hard_exit_t1\"," + hardHead)
+    strategy.close("OverlayT2", comment = "Overlay Hard Exit T2", alert_message = "{\"event\":\"overlay_hard_exit_t2\"," + hardHead)
+    strategy.close("OverlayT3", comment = "Overlay Hard Exit T3", alert_message = "{\"event\":\"overlay_hard_exit_t3\"," + hardHead)
     overlayHardExitSent := true
 
 // ============================================================================
@@ -737,77 +703,43 @@ plot(showStops and overlayCampaignLive ? overlayT2Target : na, "Overlay Tier 2 T
 plot(showStops and overlayCampaignLive ? overlayT3Target : na, "Overlay Tier 3 Target", color = color.new(color.green, 55), style = plot.style_linebr)
 plot(showStops and tier3Open ? overlayT3Stop : na, "Overlay Tier 3 Active Stop", color = color.fuchsia, style = plot.style_linebr, linewidth = 2)
 
-plotshape(
-     showSignals and overlayLongSignal,
-     title = "Overlay Long Signal",
-     text = "WAE",
-     style = shape.labelup,
-     location = location.belowbar,
-     color = color.lime,
-     textcolor = color.black,
-     size = size.tiny
-)
+plotshape(showSignals and overlayLongSignal and overlaySizeOK, title = "Overlay Long Signal", text = "WAE", style = shape.labelup, location = location.belowbar, color = color.lime, textcolor = color.black, size = size.tiny)
+plotshape(showSignals and confirmedBar and inDateRange and coreTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK, title = "Core Long Signal", text = "CORE", style = shape.labelup, location = location.belowbar, color = color.orange, textcolor = color.black, size = size.tiny)
 
-plotshape(
-     showSignals and confirmedBar and coreTrendOK and not coreOpen and not coreOrderPending,
-     title = "Core Long Signal",
-     text = "CORE",
-     style = shape.labelup,
-     location = location.belowbar,
-     color = color.orange,
-     textcolor = color.black,
-     size = size.tiny
-)
-
-// WAE debug — Data Window values + chart markers (pane display is unreliable on some overlay strategies)
-plot(showWaeDebug ? waeUp : na, "WAE Up", color = color.new(color.lime, 0), display = display.data_window)
-plot(showWaeDebug ? explosion : na, "WAE Explosion", color = color.new(color.orange, 0), display = display.data_window)
-plot(showWaeDebug ? deadZone : na, "WAE Dead Zone", color = color.new(color.gray, 0), display = display.data_window)
-plot(showWaeDebug ? waeUpNorm : na, "WAE Up/StDev", color = color.new(color.aqua, 0), display = display.data_window)
-plot(showWaeDebug ? waeUp : na, "WAE Up Raw", color = color.new(color.green, 0), display = display.data_window)
-plotshape(showWaeDebug and waeLongOK and confirmedBar, title = "WAE Long OK Mark", style = shape.circle, location = location.abovebar, color = color.aqua, size = size.tiny)
-bgcolor(phase1OverlayProof ? color.new(color.yellow, 92) : na, title = "Proof Mode")
-bgcolor(showWaeDebug and waeLongOK ? color.new(color.lime, 90) : na, title = "WAE Long OK")
-
+// Data Window diagnostics
+plot(showWaeDebug ? waeUpNorm : na, "WAE Up/StDev", display = display.data_window)
+plot(showWaeDebug ? (htfLongOK ? 1.0 : 0.0) : na, "DBG htfLongOK", display = display.data_window)
+plot(showWaeDebug ? volRatio : na, "DBG volRatio", display = display.data_window)
+plot(showWaeDebug ? gapAtr : na, "DBG gapATR", display = display.data_window)
+plot(showWaeDebug ? overlayQty : na, "DBG overlayQty", display = display.data_window)
+plot(showWaeDebug ? coreCostCash : na, "DBG coreCostBasis$", display = display.data_window)
+plot(showWaeDebug ? overlayBudgetCash : na, "DBG overlayBudget$", display = display.data_window)
 
 // ============================================================================
 // Status table
 // ============================================================================
-var table statusTable = table.new(position.top_right, 2, 12, border_width = 1)
+var table statusTable = table.new(position.top_right, 2, 11, border_width = 1)
 
 if barstate.islast and showStatusTable
     table.cell(statusTable, 0, 0, "Trend-Core WAE", text_color = color.white, bgcolor = color.rgb(30, 30, 30))
     table.cell(statusTable, 1, 0, "Status", text_color = color.white, bgcolor = color.rgb(30, 30, 30))
-
     table.cell(statusTable, 0, 1, "Core trend")
     table.cell(statusTable, 1, 1, coreTrendOK ? "UP" : "OUT", text_color = coreTrendOK ? color.lime : color.red)
-
     table.cell(statusTable, 0, 2, "Core open")
     table.cell(statusTable, 1, 2, coreOpen ? "YES" : "NO", text_color = coreOpen ? color.lime : color.silver)
-
-    table.cell(statusTable, 0, 3, "HTF WAE")
+    table.cell(statusTable, 0, 3, "HTF WAE (" + htfWaeTf + ")")
     table.cell(statusTable, 1, 3, htfWaeLongOK ? "CONFIRMED UP" : "NO", text_color = htfWaeLongOK ? color.lime : color.silver)
-
     table.cell(statusTable, 0, 4, "Chart WAE")
     table.cell(statusTable, 1, 4, waeLongOK ? "UP" : "NO", text_color = waeLongOK ? color.lime : color.silver)
-
     table.cell(statusTable, 0, 5, "RSI")
     table.cell(statusTable, 1, 5, str.tostring(rsiValue, "#.0"))
-
     table.cell(statusTable, 0, 6, "Overlay")
     table.cell(statusTable, 1, 6, overlayCampaignLive ? "ACTIVE" : "FLAT", text_color = overlayCampaignLive ? color.aqua : color.silver)
-
     table.cell(statusTable, 0, 7, "T3 Breakeven")
     table.cell(statusTable, 1, 7, tier3BreakevenArmed ? "ARMED" : "OFF", text_color = tier3BreakevenArmed ? color.lime : color.silver)
-
     table.cell(statusTable, 0, 8, "T3 ATR Trail")
     table.cell(statusTable, 1, 8, tier3TrailingActive ? "ACTIVE" : "OFF", text_color = tier3TrailingActive ? color.fuchsia : color.silver)
-
-    table.cell(statusTable, 0, 9, "Session")
-    table.cell(statusTable, 1, 9, tradingWindowOK ? "OPEN" : "BLOCKED", text_color = tradingWindowOK ? color.lime : color.red)
-
-    table.cell(statusTable, 0, 10, "Proof mode")
-    table.cell(statusTable, 1, 10, phase1OverlayProof ? "ON (eased WAE)" : "OFF", text_color = phase1OverlayProof ? color.yellow : color.silver)
-
-    table.cell(statusTable, 0, 11, "Up/StDev")
-    table.cell(statusTable, 1, 11, na(waeUpNorm) ? "n/a" : str.tostring(waeUpNorm, "#.###"), text_color = (not na(waeUpNorm) and waeUpNorm > explosion) ? color.lime : color.silver)
+    table.cell(statusTable, 0, 9, "Event guard")
+    table.cell(statusTable, 1, 9, volShockOK and gapOK ? "CLEAR" : "BLOCKED", text_color = volShockOK and gapOK ? color.lime : color.red)
+    table.cell(statusTable, 0, 10, "Session")
+    table.cell(statusTable, 1, 10, tradingWindowOK ? "OPEN" : "BLOCKED", text_color = tradingWindowOK ? color.lime : color.red)
