@@ -79,6 +79,24 @@ coreReentryCooldown = input.int(
      tooltip = "Bars to wait after any Core exit before a new Core entry. Reduces stop-out / re-entry whipsaw."
 )
 
+emaExitBandPct = input.float(
+     0.0, "EMA Exit Band %",
+     minval = 0.0, maxval = 10.0, step = 0.25, group = grpCore,
+     tooltip = "0 = original rule. Otherwise enter only when close is this % above the EMA and exit only when close is this % below it. Tested 2026-09-25: every band raised drawdown and lowered Sharpe on all four ETFs (rl_optimizer/results/core_rules.csv)."
+)
+
+trailTightenTriggerPct = input.float(
+     0.0, "Tighten Trail After Gain %",
+     minval = 0.0, maxval = 200.0, step = 5.0, group = grpCore,
+     tooltip = "0 = original rule. Otherwise, once the highest high is this % above the entry price, the trailing stop switches to Tightened Trailing Stop %. Tested 2026-09-25: 30 with a 10% trail cut QQQ/SMH drawdown by 7-11 points at a 1.3% profit cost, SPY drawdown rose 4 points."
+)
+
+trailTightPct = input.float(
+     10.0, "Tightened Trailing Stop %",
+     minval = 1.0, maxval = 30.0, step = 0.25, group = grpCore,
+     tooltip = "Trailing stop used after the gain trigger. Ignored when Tighten Trail After Gain % is 0."
+)
+
 paperSizingCapital = input.float(
      26000.0, "Paper / Sizing Capital $",
      minval = 1000.0, step = 500.0, group = grpRisk,
@@ -132,6 +150,9 @@ f_openTradePrice(string entryId) =>
 float pointValue = math.max(syminfo.pointvalue, 0.00000001)
 float emaValue = ta.ema(close, emaLen)
 bool coreTrendOK = close > emaValue
+// EMA exit band: with a band of 0 both conditions equal coreTrendOK (the original rule).
+bool coreEntryTrendOK = close > emaValue * (1.0 + emaExitBandPct / 100.0)
+bool coreHoldTrendOK = close > emaValue * (1.0 - emaExitBandPct / 100.0)
 bool confirmedBar = barstate.isconfirmed
 bool inDateRange = time >= startDate
 
@@ -157,9 +178,11 @@ if coreOpen
         corePeak := math.max(f_openTradePrice("Core"), high)
     else
         corePeak := math.max(nz(corePeak, high), high)
-    coreStop := corePeak * (1.0 - coreTrailPct / 100.0)
+    // Tightened trail once the peak is the trigger % above the entry price (trigger 0 = original rule).
+    float effectiveTrailPct = trailTightenTriggerPct > 0.0 and corePeak >= f_openTradePrice("Core") * (1.0 + trailTightenTriggerPct / 100.0) ? trailTightPct : coreTrailPct
+    coreStop := corePeak * (1.0 - effectiveTrailPct / 100.0)
     strategy.exit("CoreProtectiveStop", from_entry = "Core", stop = coreStop, comment = "Core Trailing Stop", alert_message = coreStopAlert)
-    if confirmedBar and not coreTrendOK
+    if confirmedBar and not coreHoldTrendOK
         strategy.close(
              "Core",
              comment = "Core EMA Exit",
@@ -178,7 +201,7 @@ else
 bool coreCooldownOK = na(coreCooldownUntil) or bar_index >= coreCooldownUntil
 
 // Enter the core only after confirmed trend qualification. Fills at the next open.
-if confirmedBar and inDateRange and coreTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK
+if confirmedBar and inDateRange and coreEntryTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK
     float sizingEq = f_sizingEquity()
     float rawCoreQty = (sizingEq * coreAllocationPct / 100.0) / (close * pointValue)
     float coreQty = f_roundDownToIncrement(rawCoreQty, qtyIncrement)
@@ -200,7 +223,7 @@ if confirmedBar and inDateRange and coreTrendOK and not coreOpen and not coreOrd
 // ============================================================================
 plot(showEMA ? emaValue : na, "Trend EMA", color = color.orange, linewidth = 2)
 plot(showStops and coreOpen ? coreStop : na, "Core Protective Stop", color = color.red, style = plot.style_linebr, linewidth = 2)
-plotshape(showSignals and confirmedBar and inDateRange and coreTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK, title = "Core Long Signal", text = "CORE", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.tiny)
+plotshape(showSignals and confirmedBar and inDateRange and coreEntryTrendOK and not coreOpen and not coreOrderPending and coreCooldownOK, title = "Core Long Signal", text = "CORE", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.tiny)
 
 var table statusTable = table.new(position.top_right, 2, 5, border_width = 1)
 if barstate.islast and showStatusTable

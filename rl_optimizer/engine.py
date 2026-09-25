@@ -216,6 +216,7 @@ P_KEYS = [
     "overlayRiskPct", "maxOverlayRiskCash", "maxOverlayNotionalPct", "maxGrossExposurePct",
     "enableOverlay", "flattenOverlayWithoutCore", "minOverlayQty",
     "useCoreVolTarget", "coreVolTargetPct",
+    "emaExitBandPct", "trailTightenTriggerPct", "trailTightPct",
 ]
 
 DEFAULTS = dict(
@@ -231,6 +232,8 @@ DEFAULTS = dict(
     overlayRiskPct=0.25, maxOverlayRiskCash=65.0, maxOverlayNotionalPct=25.0,
     maxGrossExposurePct=125.0, enableOverlay=1, flattenOverlayWithoutCore=1, minOverlayQty=3.0,
     useCoreVolTarget=0, coreVolTargetPct=18.0, coreVolLen=63,
+    # Core rule experiments (0 = off, identical to the original rules)
+    emaExitBandPct=0.0, trailTightenTriggerPct=0.0, trailTightPct=15.25,
 )
 
 
@@ -298,10 +301,10 @@ def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, g
     (alloc, trail, cooldown, atr_stop_mult, t1r, t2r, t3r, use_be, be_r, trail_start_r,
      atr_trail_mult, hx_mom, hx_trend, rsi_hx, rsi_entry, use_rsi, use_slope, use_htf,
      use_vol, vol_max, use_gap, gap_max, risk_pct, risk_cap, notional_pct, gross_pct,
-     enable_ov, flatten_orphan, min_ov_qty, use_vt, vt_pct) = (P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7], P[8],
+     enable_ov, flatten_orphan, min_ov_qty, use_vt, vt_pct, ema_band, tight_trig, tight_pct) = (P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7], P[8],
                                                P[9], P[10], P[11], P[12], P[13], P[14], P[15], P[16], P[17],
                                                P[18], P[19], P[20], P[21], P[22], P[23], P[24], P[25],
-                                               P[26], P[27], P[28], P[29], P[30])
+                                               P[26], P[27], P[28], P[29], P[30], P[31], P[32], P[33])
 
     equity = np.full(n, capital)
     exposure = np.zeros(n)
@@ -422,14 +425,21 @@ def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, g
 
         # ---------------- script logic on the confirmed close ----------------
         trend_ok = (not np.isnan(ema_v[i])) and ci > ema_v[i]
+        # EMA exit band: enter only above ema*(1+band), exit only below ema*(1-band). band=0 is the original rule.
+        entry_trend_ok = (not np.isnan(ema_v[i])) and ci > ema_v[i] * (1.0 + ema_band / 100.0)
+        hold_trend_ok = (not np.isnan(ema_v[i])) and ci > ema_v[i] * (1.0 - ema_band / 100.0)
         core_open = core_qty > 0
         if core_open:
             if not core_open_prev:
                 core_peak = max(core_px, hi)
             else:
                 core_peak = max(core_peak, hi)
-            core_stop = core_peak * (1.0 - trail / 100.0)
-            if not trend_ok:
+            # Tightened trail once the peak is trigger% above the entry price. trigger=0 is the original rule.
+            eff_trail = trail
+            if tight_trig > 0.0 and core_peak >= core_px * (1.0 + tight_trig / 100.0):
+                eff_trail = tight_pct
+            core_stop = core_peak * (1.0 - eff_trail / 100.0)
+            if not hold_trend_ok:
                 core_pend_close = True
         else:
             if core_open_prev:
@@ -437,7 +447,7 @@ def run_engine(o, h, l, c, ema_v, atr_v, rsi_v, wae_ok, wae_dd, htf_ok, vol_r, g
             core_peak = np.nan
             core_stop = np.nan
         cooldown_ok = cooldown_until < 0 or i >= cooldown_until
-        if i >= start and trend_ok and (not core_open) and cooldown_ok:
+        if i >= start and entry_trend_ok and (not core_open) and cooldown_ok:
             scale = 1.0
             if use_vt > 0.5:
                 scale = 0.0 if np.isnan(rv[i]) or rv[i] <= 0 else min(1.0, vt_pct / rv[i])
