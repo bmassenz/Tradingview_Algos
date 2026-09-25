@@ -165,7 +165,7 @@ maxOverlayNotionalPct = input.float(
 maxGrossExposurePct = input.float(
      100.0, "Maximum Combined Gross Exposure % of Equity",
      minval = 25.0, maxval = 300.0, step = 5.0, group = grpRisk,
-     tooltip = "Caps projected core plus overlay notional exposure. Paper $26k default uses 100% unlevered."
+     tooltip = "Blocks new overlays when the Core's cost-basis notional exceeds this % of sizing equity (+1% tolerance). Overlay notional is additive, capped separately by Maximum Overlay Notional %."
 )
 
 paperSizingCapital = input.float(
@@ -322,6 +322,20 @@ f_openTradePrice(string entryId) =>
             if strategy.opentrades.entry_id(i) == entryId
                 price := strategy.opentrades.entry_price(i)
     price
+
+f_openTradeSize(string entryId) =>
+    float qtySum = 0.0
+    if strategy.opentrades > 0
+        for i = 0 to strategy.opentrades - 1
+            if strategy.opentrades.entry_id(i) == entryId
+                qtySum += math.abs(strategy.opentrades.size(i))
+    qtySum
+
+// Core exposure at cost basis (entry price x open Core qty). Mark-to-market would
+// block every overlay once a 100%-allocated Core gains >1% against fixed paper capital.
+f_coreCostBasisCash() =>
+    float corePx = f_openTradePrice("Core")
+    na(corePx) ? 0.0 : f_openTradeSize("Core") * corePx * math.max(syminfo.pointvalue, 0.00000001)
 
 // Effective normalized WAE thresholds (Up/StDev). Proof mode eases chart + HTF together.
 float waeBBMultEff = phase1OverlayProof ? proofExplosionMult : waeBBMult
@@ -526,8 +540,8 @@ float _dbgRiskCash = math.min(_dbgSizingEq * overlayRiskPct / 100.0, maxOverlayR
 float _dbgQtyRisk = _dbgRiskDist > 0.0 ? _dbgRiskCash / (_dbgRiskDist * pointValue) : na
 float _dbgOverlayBudget = _dbgSizingEq * maxOverlayNotionalPct / 100.0
 float _dbgQtyNotional = close > 0.0 ? _dbgOverlayBudget / (close * pointValue) : na
-// Gross: Core live notional only. Overlay budget is additive up to maxOverlayNotionalPct (so Core@100% still allows small overlay).
-float _dbgCoreExp = strategy.position_size > 0 ? math.abs(strategy.position_size) * close * pointValue : 0.0
+// Gross: Core cost-basis notional only. Overlay budget is additive up to maxOverlayNotionalPct (so Core@100% still allows small overlay).
+float _dbgCoreExp = f_coreCostBasisCash()
 bool _dbgCoreOverBudget = _dbgCoreExp > _dbgSizingEq * maxGrossExposurePct / 100.0 * 1.01
 float _dbgQty = phase1OverlayProof ? (3.0 * qtyIncrement) : f_roundDownToIncrement(math.min(nz(_dbgQtyRisk), nz(_dbgQtyNotional)), qtyIncrement)
 plot(showWaeDebug ? _dbgQtyRisk : na, "DBG qtyByRisk", display = display.data_window)
@@ -564,10 +578,12 @@ if overlayLongSignal
     float rawOverlayQty = math.min(rawQtyByRisk, rawQtyByNotional)
     float overlayQty = phase1OverlayProof ? (3.0 * qtyIncrement) : f_roundDownToIncrement(rawOverlayQty, qtyIncrement)
 
-    float coreExposureCash = math.abs(strategy.position_size) * plannedEntry * pointValue
+    // Guard against an oversized Core (e.g. duplicate fills), not against Core appreciation.
+    float coreExposureCash = f_coreCostBasisCash()
     bool coreOverGross = coreExposureCash > sizingEq * maxGrossExposurePct / 100.0 * 1.01
     float maxSharesTotal = f_roundDownToIncrement(overlayBudgetCash / (plannedEntry * pointValue), qtyIncrement)
-    float maxSharesPerTier = f_roundDownToIncrement(math.max(qtyIncrement, maxSharesTotal / 3.0), qtyIncrement)
+    // Ceiling split: Tier 3 takes the remainder, so it can hold up to ceil(total/3) + one increment.
+    float maxSharesPerTier = math.max(qtyIncrement, math.ceil(maxSharesTotal / 3.0 / qtyIncrement) * qtyIncrement)
 
     if not coreOverGross and overlayQty >= minOverlayQty and overlayQty <= maxSharesTotal + qtyIncrement
         float tier1Qty = phase1OverlayProof ? qtyIncrement : f_roundDownToIncrement(overlayQty / 3.0, qtyIncrement)
