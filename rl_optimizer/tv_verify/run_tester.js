@@ -69,7 +69,7 @@ let PAGE = null;
   await p.click('[data-name="pine-dialog-button"]'); await p.waitForTimeout(5000);
   await p.locator('#overlap-manager-root .monaco-editor .view-lines').first().click(); await p.keyboard.press('Control+A');
   await p.evaluate(s => navigator.clipboard.writeText(s), SRC); await p.keyboard.press('Control+V'); await p.waitForTimeout(3000);
-  await p.locator('#overlap-manager-root button', { hasText: /^Add to chart$/ }).first().click(); L('added to chart');
+  await p.locator('#overlap-manager-root button', { hasText: /Add to chart|Update on chart/ }).first().click(); L('added to chart');
   await p.waitForTimeout(40000);
   await p.locator('#overlap-manager-root button[aria-label="Close"]').first().click(); await p.waitForTimeout(2000);
   const lg = await legend(p); L('legend: ' + JSON.stringify(lg));
