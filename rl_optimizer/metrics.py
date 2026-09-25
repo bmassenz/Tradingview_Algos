@@ -30,8 +30,21 @@ def window_metrics(asset, eq, trades, start, end):
     dd_dev = np.sqrt(np.mean(np.minimum(r, 0.0) ** 2))
     sortino = r.mean() / dd_dev * np.sqrt(252) if dd_dev > 0 else 0.0
     peak = np.maximum.accumulate(seg)
-    max_dd = float(np.max(peak - seg)) / CAPITAL  # drawdown of the fixed-size book
-    tv_dd = float(np.max((peak - seg) / peak))     # TradingView-style % of peak equity
+    max_dd = float(np.max(peak - seg)) / CAPITAL  # drawdown of the fixed-size book, marked to market daily
+    # TradingView's "Max drawdown", reproduced to within 0.1% on SPY/QQQ/SMH/IWM (tv_verify/RESULTS.md):
+    # the peak is the running high of closed-trade equity, the trough is closed-trade equity plus any
+    # open LOSS at the bar's low, and open profit is never counted. max_dd above also counts open
+    # profit that is given back before a trade closes, so it is the larger and more conservative number.
+    n = len(asset.c)
+    realized = np.zeros(n)
+    open_low = np.zeros(n)
+    for e, x, q, px, pl in zip(trades.entry_idx.to_numpy(), trades.exit_idx.to_numpy(), trades.qty.to_numpy(),
+                               trades.entry_px.to_numpy(), trades.pnl.to_numpy()):
+        realized[x:] += pl
+        if x > e:
+            open_low[e:x] += (asset.l[e:x] - px) * q
+    rs = realized[a - 1:b]
+    tv_dd_usd = float(np.max(np.maximum.accumulate(rs) - (rs + np.minimum(open_low[a - 1:b], 0.0))))
     t = trades[(trades.exit_idx >= a) & (trades.exit_idx < b)]
     ov = t[t.kind > 0]
     wins = t.pnl[t.pnl > 0].sum()
@@ -46,7 +59,8 @@ def window_metrics(asset, eq, trades, start, end):
         sharpe=float(sharpe),
         sortino=float(sortino),
         max_dd=max_dd,
-        tv_max_dd=tv_dd,
+        tv_max_dd=tv_dd_usd / CAPITAL,
+        tv_max_dd_usd=tv_dd_usd,
         trades=int(len(t)),
         win_rate=float((t.pnl > 0).mean()) if len(t) else 0.0,
         pf=float(min(pf, PF_CAP)),

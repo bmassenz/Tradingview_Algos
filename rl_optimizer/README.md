@@ -10,8 +10,9 @@ and the results. Each symbol is tested independently with the same parameter set
   2023-2026 holdout. The original defaults lost money on IWM from 2020 to 2022.
 - Profit factor is at least 1.65 in every window on every asset. The overlay makes money over
   2008-2026 on every asset. The original overlay lost money on SMH and IWM.
-- Three of six robustness gates still fail. Drawdowns on QQQ and SMH exceed 30% of capital, and
-  IWM's Sharpe stays between 0.21 and 0.34. Seven PPO seeds across three rounds did not fix either without changing
+- Three of six robustness gates still fail. Marked-to-market drawdowns on QQQ and SMH exceed 30% of
+  capital (TradingView's own drawdown figure, which ignores open profit, stays under 30% on all
+  four), and IWM's Sharpe stays between 0.21 and 0.34. Seven PPO seeds across three rounds did not fix either without changing
   the Core entry and exit rules, which were kept as requested.
 - Against a constant $26k buy-and-hold, the strategy earns less on every asset. Its Sharpe is
   lower on the holdout. Its value is crash protection: in-sample drawdowns of 25-36% versus
@@ -61,9 +62,15 @@ The script compiles with no errors or warnings in TradingView's Pine compiler.
 - The replica's accounting balances: equity at a flat bar equals the sum of closed-trade P&L.
 - `pine_defaults.py` parses the defaults from the `.pine` file. The replica reproduces the selected
   results exactly from them.
-- Not done: a side-by-side run in TradingView's strategy tester. The container's proxy rejects the
-  websocket connections TradingView uses for chart data and strategy results. Run the script on a
-  daily chart of each symbol to confirm.
+- TradingView Strategy Tester, run headlessly with a signed-in session (`tv_verify/RESULTS.md`):
+  trade counts match exactly on all four ETFs over 2008-2026, net profit is within 0.6%, profit
+  factor within 1.3%, win rate within 1.2 points, and overlay P&L within 1% on three of four.
+- Drawdown definitions differ. TradingView's "Max drawdown" takes its peak from closed-trade equity
+  and its trough from closed-trade equity plus any open loss at the bar's low, so open profit never
+  counts. The Python `max_dd` marks open positions to market daily, so profit given back before a
+  trade closes counts too. With TradingView's definition (`tv_max_dd` in `metrics.py`) Python
+  matches TradingView to within 0.3% on every ETF. The tables below use the marked-to-market figure
+  because it is the larger, more conservative risk measure.
 
 ## Optimization method
 
@@ -140,7 +147,8 @@ The gates were set before optimization. Every asset must pass each one.
 |---|---|---|
 | G1: P&L > 0 in-sample, out-of-sample and in the holdout | Pass | Fail (IWM out-of-sample) |
 | G2: profit factor >= 1.2 in every window | Pass | Fail |
-| G3: max drawdown <= 30% of capital in every window | Fail (QQQ 33%, SMH 34-41%) | Fail |
+| G3: max drawdown <= 30% of capital in every window (marked to market) | Fail (QQQ 33%, SMH 34-41%) | Fail |
+| G3 under TradingView's drawdown definition (open profit not counted) | Pass (worst: SMH 27.1%) | Fail (SMH, IWM) |
 | G4: Sharpe >= 0.4 in-sample and over 2020-2026 | Fail (IWM only) | Fail |
 | G5: worst 2020-2026 Sharpe >= 0.4 x median | Fail (IWM 0.22 vs median 0.61) | Fail |
 | G6: overlay P&L > 0 over 2008-2026 | Pass | Fail |
