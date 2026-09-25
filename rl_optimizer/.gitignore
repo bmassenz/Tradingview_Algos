@@ -1,2 +1,3 @@
 results/*.jsonl
 results/*_ppo.zip
+results/*.log
