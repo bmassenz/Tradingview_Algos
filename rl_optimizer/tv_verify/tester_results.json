@@ -1,0 +1,33 @@
+{
+ "AMEX:SPY": {
+  "total_pnl": "+34,595.77USD+133.06%",
+  "max_drawdown": "2,879.09USD7.81%",
+  "profitable_trades": "64.03%162/253",
+  "profit_factor": "3.425",
+  "gross_profit": "45,191.54USD173.81%",
+  "gross_loss": "13,195.76USD50.75%",
+  "commission_load": "0.49%",
+  "expectancy": "126.47USD1.24%",
+  "largest_profit": "8,979.58USD",
+  "largest_loss": "1,450.28USD",
+  "total_trades": 253,
+  "winners": 162,
+  "losers": 91,
+  "pnl_by_signal": {
+   "All signals": "+34,592.91",
+   "Core Trend Entry": "+33,592.30",
+   "Overlay Tier 3 Entry": "+464.04",
+   "Overlay Tier 2 Entry": "+332.76",
+   "Overlay Tier 1 Entry": "+203.81"
+  },
+  "symbol_on_chart": "BATS:SPY",
+  "range": "Jan 29, 1993 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "11.07%",
+  "first_trade": {
+   "entry_date": "May 5, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "May 6, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ }
+}
