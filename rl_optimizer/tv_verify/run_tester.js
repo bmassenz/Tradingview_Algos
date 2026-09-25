@@ -7,10 +7,11 @@
 // The run works in a new chart layout named by TV_LAYOUT_NAME (default "tv_verify <date>") so the account's
 // saved layouts are left alone; delete it from Manage layouts when done.
 const { chromium } = require('playwright'); const { install, installRestFix, UA } = require('./bridge'); const fs = require('fs'); const path = require('path');
-const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'trend_core_wae_professional.pine'), 'utf8');
+const SRC = fs.readFileSync(process.env.TV_SCRIPT || path.join(__dirname, '..', '..', 'trend_core_wae_professional.pine'), 'utf8'); // TV_SCRIPT: another .pine file
+const PREFIX = process.env.TV_OUT_PREFIX || 'tester_'; // screenshot and results file prefix
 const SYMBOLS = (process.env.TV_SYMBOLS || 'AMEX:SPY,NASDAQ:QQQ,NASDAQ:SMH,AMEX:IWM').split(',');
 const LAYOUT = process.env.TV_LAYOUT_NAME || ('tv_verify ' + new Date().toISOString().slice(0, 10));
-const STRATEGY = 'Trend-Core WAE Professional';
+const STRATEGY = (SRC.match(/strategy\(\s*\n?\s*"([^"]+)"/) || [])[1] || 'Trend-Core WAE Professional';
 const t0 = Date.now(); const L = m => console.log(((Date.now() - t0) / 1000).toFixed(1) + 's ' + m);
 const shot = (p, name) => p.screenshot({ path: path.join(__dirname, name) });
 const bodyText = p => p.evaluate(() => document.body.innerText.replace(/[ \t]+/g, ' ').replace(/\n{2,}/g, '\n'));
@@ -94,17 +95,17 @@ let PAGE = null;
     const r = parseOverview(text);
     r.symbol_on_chart = await p.evaluate(() => window.TradingViewApi.activeChart().symbol());
     r.range = (text.match(/[A-Z][a-z]{2} \d{1,2}, \d{4} — [A-Z][a-z]{2} \d{1,2}, \d{4}/) || [null])[0];
-    await shot(p, 'tester_' + tag + '.png');
+    await shot(p, PREFIX + tag + '.png');
     await clickText(p, 'Growth and decline'); text = await bodyText(p);
     r.max_drawdown_pct_of_initial_capital = grab(text, 'Max drawdown as % of initial capital');
     await clickView(p, 1); text = await bodyText(p);
     const ft = text.match(/1Long[\s\S]{0,40}?Exit\nEntry\n \n([^\n]+)\n([^\n]+)\n \n([^\n]+)\n([^\n]+)/);
     if (ft) r.first_trade = { entry_date: ft[2], entry_signal: ft[4], exit_date: ft[1], exit_signal: ft[3] };
-    await shot(p, 'tester_' + tag + '_list_of_trades.png');
+    await shot(p, PREFIX + tag + '_list_of_trades.png');
     await clickView(p, 0);
     results[s] = r; L('TESTER ' + s + ': ' + JSON.stringify(r));
   }
-  fs.writeFileSync(path.join(__dirname, 'tester_results.json'), JSON.stringify(results, null, 1));
-  L('wrote tester_results.json');
+  fs.writeFileSync(path.join(__dirname, PREFIX + 'results.json'), JSON.stringify(results, null, 1));
+  L('wrote ' + PREFIX + 'results.json');
   await b.close();
 })().catch(async e => { console.error('ERR', e.message); if (PAGE) await PAGE.screenshot({ path: path.join(__dirname, 'error.png') }).catch(() => {}); process.exit(1); });

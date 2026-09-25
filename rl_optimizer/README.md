@@ -1,11 +1,15 @@
 # Trend-Core WAE: audit, Python replica and PPO cross-asset optimization
 
-This folder backs the defaults in `../trend_core_wae_professional.pine`. It holds a bar-by-bar
+This folder backs the defaults in `../trend_core_wae_professional.pine` and its Core-only
+version `../trend_core_professional.pine`. It holds a bar-by-bar
 Python replica of the audited Pine strategy, a PPO parameter search over SPY, QQQ, SMH and IWM,
 and the results. Each symbol is tested independently with the same parameter set.
 
 ## Bottom line
 
+- **Ship the Core only.** `../trend_core_professional.pine` is the Core position without the WAE
+  overlay. In TradingView and in the replica it gives up 0.8% to 2.9% of profit with the same Sharpe
+  and drawdown, using 37 to 46 trades instead of 231 to 258 (`tv_verify/CORE_ONLY.md`).
 - The PPO-selected parameters make money in every window on every asset, including the untouched
   2023-2026 holdout. The original defaults lost money on IWM from 2020 to 2022.
 - Profit factor is at least 1.65 in every window on every asset. The overlay makes money over

@@ -4,7 +4,8 @@
 `trend_core_wae_professional.pine` into the Pine Editor, adds it to a daily chart, and reads the
 Strategy Tester report for SPY, QQQ, SMH and IWM. It writes `tester_results.json` and two screenshots
 per symbol (`tester_<SYMBOL>.png`, `tester_<SYMBOL>_list_of_trades.png`) next to the script.
-`RESULTS.md` holds the 2026-09-25 run compared with the Python replica.
+`RESULTS.md` holds the 2026-09-25 run compared with the Python replica; `CORE_ONLY.md` holds the
+same comparison for the Core-only script (`core_only_*` files).
 
 ## 1. Supply a signed-in TradingView session
 
@@ -39,6 +40,7 @@ CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node run_tester.js   #
 node run_tester.js                                                              # elsewhere, with Playwright's Chromium
 TV_SYMBOLS=AMEX:SPY node run_tester.js                                          # one symbol
 TV_LAYOUT_NAME="my check" node run_tester.js                                    # name of the layout it creates
+TV_SCRIPT=../../trend_core_professional.pine TV_OUT_PREFIX=core_only_ node run_tester.js   # another script, own output prefix
 ```
 
 Run it in the background with the output in a log file; a full run takes about five minutes.

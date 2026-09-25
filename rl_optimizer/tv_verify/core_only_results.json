@@ -1,0 +1,114 @@
+{
+ "AMEX:SPY": {
+  "total_pnl": "+33,595.16USD+129.21%",
+  "max_drawdown": "2,906.16USD7.71%",
+  "profitable_trades": "43.24%16/37",
+  "profit_factor": "3.606",
+  "gross_profit": "42,890.42USD164.96%",
+  "gross_loss": "11,895.26USD45.75%",
+  "commission_load": "0.46%",
+  "expectancy": "837.71USD3.22%",
+  "largest_profit": "8,979.58USD",
+  "largest_loss": "1,450.28USD",
+  "total_trades": 37,
+  "winners": 16,
+  "losers": 21,
+  "pnl_by_signal": {
+   "All signals": "+33,592.30",
+   "Core Trend Entry": "+33,592.30"
+  },
+  "symbol_on_chart": "BATS:SPY",
+  "range": "Jan 29, 1993 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "11.18%",
+  "first_trade": {
+   "entry_date": "May 5, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "May 6, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ },
+ "NASDAQ:QQQ": {
+  "total_pnl": "+62,558.64USD+240.61%",
+  "max_drawdown": "4,805.59USD14.99%",
+  "profitable_trades": "36.36%12/33",
+  "profit_factor": "5.32",
+  "gross_profit": "71,855.20USD276.37%",
+  "gross_loss": "13,507.36USD51.95%",
+  "commission_load": "0.25%",
+  "expectancy": "1,768.12USD6.80%",
+  "largest_profit": "18,517.33USD",
+  "largest_loss": "1,595.41USD",
+  "total_trades": 33,
+  "winners": 12,
+  "losers": 21,
+  "pnl_by_signal": {
+   "All signals": "+62,555.66",
+   "Core Trend Entry": "+62,555.66"
+  },
+  "symbol_on_chart": "BATS:QQQ",
+  "range": "Mar 10, 1999 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "18.48%",
+  "first_trade": {
+   "entry_date": "Jan 3, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "Jan 8, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ },
+ "NASDAQ:SMH": {
+  "total_pnl": "+63,930.16USD+245.89%",
+  "max_drawdown": "6,970.88USD25.22%",
+  "profitable_trades": "39.13%18/46",
+  "profit_factor": "3.748",
+  "gross_profit": "85,270.43USD327.96%",
+  "gross_loss": "22,753.11USD87.51%",
+  "commission_load": "0.29%",
+  "expectancy": "1,359.07USD5.25%",
+  "largest_profit": "17,922.95USD",
+  "largest_loss": "3,064.77USD",
+  "total_trades": 46,
+  "winners": 18,
+  "losers": 28,
+  "pnl_by_signal": {
+   "All signals": "+63,927.49",
+   "Core Trend Entry": "+63,927.49"
+  },
+  "symbol_on_chart": "BATS:SMH",
+  "range": "May 5, 2000 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "26.81%",
+  "first_trade": {
+   "entry_date": "May 15, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "May 22, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ },
+ "AMEX:IWM": {
+  "total_pnl": "+23,755.78USD+91.37%",
+  "max_drawdown": "5,820.59USD12.55%",
+  "profitable_trades": "26.67%12/45",
+  "profit_factor": "2.184",
+  "gross_profit": "42,546.94USD163.64%",
+  "gross_loss": "19,477.36USD74.91%",
+  "commission_load": "0.56%",
+  "expectancy": "512.66USD1.97%",
+  "largest_profit": "9,295.88USD",
+  "largest_loss": "1,759.41USD",
+  "total_trades": 45,
+  "winners": 12,
+  "losers": 33,
+  "pnl_by_signal": {
+   "All signals": "+23,753.13",
+   "Core Trend Entry": "+23,753.13"
+  },
+  "symbol_on_chart": "BATS:IWM",
+  "range": "May 26, 2000 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "22.39%",
+  "first_trade": {
+   "entry_date": "May 30, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "Jun 3, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ }
+}
