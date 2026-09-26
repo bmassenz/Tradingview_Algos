@@ -7,7 +7,10 @@ NASDAQ:QQQ, NASDAQ:SMH and AMEX:IWM. History starts in 2000 so slow indicators
 import os
 import pandas as pd
 
-SYMBOLS = {"SPY": "AMEX:SPY", "QQQ": "NASDAQ:QQQ", "SMH": "NASDAQ:SMH", "IWM": "AMEX:IWM"}
+# The traded basket. IWM was dropped on 2026-09-26 (Sharpe 0.21-0.34 and a 27% win rate in every
+# window and both engines, see tv_verify/BASKET.md); its data stays available in ALL_SYMBOLS.
+SYMBOLS = {"SPY": "AMEX:SPY", "QQQ": "NASDAQ:QQQ", "SMH": "NASDAQ:SMH"}
+ALL_SYMBOLS = dict(SYMBOLS, IWM="AMEX:IWM")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 

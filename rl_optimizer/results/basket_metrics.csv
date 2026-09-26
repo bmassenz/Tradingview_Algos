@@ -1,0 +1,16 @@
+asset,window,settings,pnl_per_yr,sharpe,sortino,max_dd_pct,tv_dd_pct,win_rate,pf,trades
+SPY,IS,defaults,1479,0.48,0.65,24.5,8.6,45.8,3.28,24
+SPY,OOS,defaults,1455,0.36,0.47,22.6,9.3,33.3,3.69,6
+SPY,HOLDOUT,defaults,3114,0.87,1.21,18.2,7.1,42.9,4.49,7
+SPY,RECENT,defaults,2373,0.62,0.84,24.0,10.6,38.5,4.1,13
+SPY,FULL,defaults,1800,0.54,0.72,24.5,11.2,43.2,3.63,37
+QQQ,IS,trailTightenTriggerPct=30 trailTightPct=10,2120,0.52,0.69,28.4,18.5,32.0,2.77,25
+QQQ,OOS,trailTightenTriggerPct=30 trailTightPct=10,5724,1.04,1.41,21.0,2.3,50.0,10.0,6
+QQQ,HOLDOUT,trailTightenTriggerPct=30 trailTightPct=10,5054,0.98,1.4,23.6,7.5,40.0,8.3,5
+QQQ,RECENT,trailTightenTriggerPct=30 trailTightPct=10,5354,1.01,1.4,23.6,7.5,45.5,10.0,11
+QQQ,FULL,trailTightenTriggerPct=30 trailTightPct=10,3281,0.72,0.97,28.4,18.5,36.1,4.82,36
+SMH,IS,coreAllocationPct=80 trailTightenTriggerPct=30 trailTightPct=10,1936,0.48,0.66,28.1,20.2,33.3,2.37,30
+SMH,OOS,coreAllocationPct=80 trailTightenTriggerPct=30 trailTightPct=10,4223,0.72,1.02,23.5,14.6,44.4,5.98,9
+SMH,HOLDOUT,coreAllocationPct=80 trailTightenTriggerPct=30 trailTightPct=10,5035,0.76,1.07,27.8,12.9,50.0,3.85,10
+SMH,RECENT,coreAllocationPct=80 trailTightenTriggerPct=30 trailTightPct=10,4673,0.74,1.04,29.0,19.6,47.4,4.66,19
+SMH,FULL,coreAllocationPct=80 trailTightenTriggerPct=30 trailTightPct=10,2919,0.59,0.82,29.0,20.2,38.8,3.38,49

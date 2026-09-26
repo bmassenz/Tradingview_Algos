@@ -9,7 +9,7 @@
 const { chromium } = require('playwright'); const { install, installRestFix, UA } = require('./bridge'); const fs = require('fs'); const path = require('path');
 const SRC = fs.readFileSync(process.env.TV_SCRIPT || path.join(__dirname, '..', '..', 'trend_core_wae_professional.pine'), 'utf8'); // TV_SCRIPT: another .pine file
 const PREFIX = process.env.TV_OUT_PREFIX || 'tester_'; // screenshot and results file prefix
-const SYMBOLS = (process.env.TV_SYMBOLS || 'AMEX:SPY,NASDAQ:QQQ,NASDAQ:SMH,AMEX:IWM').split(',');
+const SYMBOLS = (process.env.TV_SYMBOLS || 'AMEX:SPY,NASDAQ:QQQ,NASDAQ:SMH').split(',');
 const LAYOUT = process.env.TV_LAYOUT_NAME || ('tv_verify ' + new Date().toISOString().slice(0, 10));
 const STRATEGY = (SRC.match(/strategy\(\s*\n?\s*"([^"]+)"/) || [])[1] || 'Trend-Core WAE Professional';
 const t0 = Date.now(); const L = m => console.log(((Date.now() - t0) / 1000).toFixed(1) + 's ' + m);
