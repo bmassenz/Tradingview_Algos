@@ -10,6 +10,10 @@ and the results. Each symbol is tested independently with the same parameter set
 - **Ship the Core only.** `../trend_core_professional.pine` is the Core position without the WAE
   overlay. In TradingView and in the replica it gives up 0.8% to 2.9% of profit with the same Sharpe
   and drawdown, using 37 to 46 trades instead of 231 to 258 (`tv_verify/CORE_ONLY.md`).
+- Two Core rule changes were tested and left off (`tv_verify/CORE_RULES.md`): an EMA exit band raises
+  drawdown on every ETF; a trailing stop that tightens to 10% after a 30% gain cuts QQQ and SMH
+  drawdown by 7 to 11 points but raises SPY's by 4 and weakens SPY and IWM out-of-sample. Both are
+  inputs in the Core-only script, verified against TradingView, so the trade-off can be revisited.
 - The PPO-selected parameters make money in every window on every asset, including the untouched
   2023-2026 holdout. The original defaults lost money on IWM from 2020 to 2022.
 - Profit factor is at least 1.65 in every window on every asset. The overlay makes money over
