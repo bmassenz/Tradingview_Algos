@@ -10,7 +10,10 @@ and the results. Each symbol is tested independently with the same parameter set
 - **Ship the Core only.** `../trend_core_professional.pine` is the Core position without the WAE
   overlay. In TradingView and in the replica it gives up 0.8% to 2.9% of profit with the same Sharpe
   and drawdown, using 37 to 46 trades instead of 231 to 258 (`tv_verify/CORE_ONLY.md`).
-- Two Core rule changes were tested and left off (`tv_verify/CORE_RULES.md`): an EMA exit band raises
+- **Basket: SPY, QQQ, SMH; IWM dropped; gates judged per asset** (`tv_verify/BASKET.md`, `basket.py`).
+  SPY on the defaults, QQQ with the trail tightened to 10% after a 30% gain, SMH the same at 80%
+  allocation. Every gate passes for every symbol, the first configuration to do so.
+- Two Core rule changes were tested and left off by default (`tv_verify/CORE_RULES.md`): an EMA exit band raises
   drawdown on every ETF; a trailing stop that tightens to 10% after a 30% gain cuts QQQ and SMH
   drawdown by 7 to 11 points but raises SPY's by 4 and weakens SPY and IWM out-of-sample. Both are
   inputs in the Core-only script, verified against TradingView, so the trade-off can be revisited.
@@ -18,7 +21,7 @@ and the results. Each symbol is tested independently with the same parameter set
   2023-2026 holdout. The original defaults lost money on IWM from 2020 to 2022.
 - Profit factor is at least 1.65 in every window on every asset. The overlay makes money over
   2008-2026 on every asset. The original overlay lost money on SMH and IWM.
-- Three of six robustness gates still fail. Marked-to-market drawdowns on QQQ and SMH exceed 30% of
+- With the original four-ETF basket and one parameter set, three of six robustness gates failed. Marked-to-market drawdowns on QQQ and SMH exceed 30% of
   capital (TradingView's own drawdown figure, which ignores open profit, stays under 30% on all
   four), and IWM's Sharpe stays between 0.21 and 0.34. Seven PPO seeds across three rounds did not fix either without changing
   the Core entry and exit rules, which were kept as requested.
