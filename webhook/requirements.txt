@@ -1,0 +1,8 @@
+tastytrade>=13,<14
+fastapi>=0.115
+uvicorn[standard]>=0.30
+tenacity>=8.2
+python-dotenv>=1.0
+pydantic-settings>=2.3
+httpx>=0.27
+pytest>=8
