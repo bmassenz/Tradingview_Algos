@@ -1,0 +1,30 @@
+{
+ "NASDAQ:SMH": {
+  "total_pnl": "+54,552.53USD+209.82%",
+  "max_drawdown": "5,246.69USD20.18%",
+  "profitable_trades": "38.78%19/49",
+  "profit_factor": "3.371",
+  "gross_profit": "75,920.68USD292.00%",
+  "gross_loss": "22,524.83USD86.63%",
+  "commission_load": "0.28%",
+  "expectancy": "1,089.71USD5.29%",
+  "largest_profit": "14,444.83USD",
+  "largest_loss": "3,352.79USD",
+  "total_trades": 49,
+  "winners": 19,
+  "losers": 30,
+  "pnl_by_signal": {
+   "All signals": "+54,550.35",
+   "Core Trend Entry": "+54,550.35"
+  },
+  "symbol_on_chart": "BATS:SMH",
+  "range": "May 5, 2000 — Sep 25, 2026",
+  "max_drawdown_pct_of_initial_capital": "20.18%",
+  "first_trade": {
+   "entry_date": "May 15, 2008",
+   "entry_signal": "Core Trend Entry",
+   "exit_date": "May 22, 2008",
+   "exit_signal": "Core EMA Exit"
+  }
+ }
+}

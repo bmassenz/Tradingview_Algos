@@ -63,4 +63,8 @@ exact, net profit within 0.4%). SMH at 80% allocation with 30/10 (`core_smh80_re
 
 | Symbol | TV net profit | Python total (P&L/yr x 18.70) | TV trades | Py trades | TV PF | Py PF | TV DD of initial capital | Py TV-definition DD |
 |---|---|---|---|---|---|---|---|---|
-| SMH | TV_SMH_PNL | 54,592 | TV_SMH_TRADES | 49 | TV_SMH_PF | 3.38 | TV_SMH_DD | 20.2% |
+| SMH | +54,552.53 | 54,592 | 49 | 49 | 3.371 | 3.38 | 20.18% | 20.2% |
+
+Trade count exact, net profit within 0.1%, profit factor within 0.3%, drawdown within 0.1 point
+(screenshots `core_smh80_NASDAQ_SMH*.png`). All three basket configurations are now verified in
+TradingView's Strategy Tester against the replica.
