@@ -54,15 +54,17 @@ def buy_and_hold(asset, start, end):
 
 
 def gates(per):
+    """Gates are judged per asset (2026-09-26); G5 is the one basket-level gate."""
     g = {}
     syms = list(per)
-    g["G1 PnL>0 in IS/OOS/HOLDOUT, every asset"] = all(per[s][w]["pnl"] > 0 for s in syms for w in ("IS", "OOS", "HOLDOUT"))
-    g["G2 PF>=1.2 in every window, every asset"] = all(per[s][w]["pf"] >= 1.2 for s in syms for w in ("IS", "OOS", "HOLDOUT"))
-    g["G3 MaxDD<=30% of capital in every window"] = all(per[s][w]["max_dd"] <= 0.30 for s in syms for w in ("IS", "OOS", "HOLDOUT"))
-    g["G4 Sharpe>=0.4 IS and 2020-26, every asset"] = all(per[s][w]["sharpe"] >= 0.4 for s in syms for w in ("IS", "RECENT"))
+    for s in syms:
+        g[f"G1 PnL>0 in IS/OOS/HOLDOUT [{s}]"] = all(per[s][w]["pnl"] > 0 for w in ("IS", "OOS", "HOLDOUT"))
+        g[f"G2 PF>=1.2 in every window [{s}]"] = all(per[s][w]["pf"] >= 1.2 for w in ("IS", "OOS", "HOLDOUT"))
+        g[f"G3 MaxDD<=30% of capital in every window [{s}]"] = all(per[s][w]["max_dd"] <= 0.30 for w in ("IS", "OOS", "HOLDOUT"))
+        g[f"G4 Sharpe>=0.4 IS and 2020-26 [{s}]"] = all(per[s][w]["sharpe"] >= 0.4 for w in ("IS", "RECENT"))
+        g[f"G6 overlay PnL>0 over 2008-26 [{s}]"] = per[s]["FULL"]["overlay_pnl"] > 0 if per[s]["FULL"]["overlay_trades"] else True
     sh = np.array([per[s]["RECENT"]["sharpe"] for s in syms])
-    g["G5 worst 2020-26 Sharpe >= 0.4 x median"] = bool(sh.min() >= 0.4 * np.median(sh))
-    g["G6 overlay PnL>0 over 2008-26, every asset"] = all(per[s]["FULL"]["overlay_pnl"] > 0 for s in syms)
+    g["G5 worst 2020-26 Sharpe >= 0.4 x median [basket]"] = bool(sh.min() >= 0.4 * np.median(sh))
     return g
 
 

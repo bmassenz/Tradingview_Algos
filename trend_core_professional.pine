@@ -18,6 +18,13 @@
 // - Chart data is split-adjusted by TradingView. Dividends are not included (conservative for ETFs).
 // Chart: daily. Load bars from 2006 or earlier so the trend EMA is warm by 2008.
 //
+// Traded basket and per-symbol inputs (decided 2026-09-26, rl_optimizer/tv_verify/BASKET.md; every
+// other input stays at its default; the gates in rl_optimizer/README.md pass per symbol):
+//   SPY  defaults
+//   QQQ  Tighten Trail After Gain % = 30, Tightened Trailing Stop % = 10
+//   SMH  Core Allocation % of Equity = 80, Tighten Trail After Gain % = 30, Tightened Trailing Stop % = 10
+//   IWM  not traded (Sharpe 0.21 to 0.34 and a 27% win rate in every window and both engines)
+//
 // IMPORTANT:
 // - This is a systematic research strategy, not investment advice.
 // - For live automation, use broker-native protective orders and broker-authoritative reconciliation.

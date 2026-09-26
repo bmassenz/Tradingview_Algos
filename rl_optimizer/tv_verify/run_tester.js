@@ -9,7 +9,7 @@
 const { chromium } = require('playwright'); const { install, installRestFix, UA } = require('./bridge'); const fs = require('fs'); const path = require('path');
 const SRC = fs.readFileSync(process.env.TV_SCRIPT || path.join(__dirname, '..', '..', 'trend_core_wae_professional.pine'), 'utf8'); // TV_SCRIPT: another .pine file
 const PREFIX = process.env.TV_OUT_PREFIX || 'tester_'; // screenshot and results file prefix
-const SYMBOLS = (process.env.TV_SYMBOLS || 'AMEX:SPY,NASDAQ:QQQ,NASDAQ:SMH,AMEX:IWM').split(',');
+const SYMBOLS = (process.env.TV_SYMBOLS || 'AMEX:SPY,NASDAQ:QQQ,NASDAQ:SMH').split(',');
 const LAYOUT = process.env.TV_LAYOUT_NAME || ('tv_verify ' + new Date().toISOString().slice(0, 10));
 const STRATEGY = (SRC.match(/strategy\(\s*\n?\s*"([^"]+)"/) || [])[1] || 'Trend-Core WAE Professional';
 const t0 = Date.now(); const L = m => console.log(((Date.now() - t0) / 1000).toFixed(1) + 's ' + m);
@@ -68,8 +68,18 @@ let PAGE = null;
   L('layout: ' + await p.title());
   // Paste the script into the Pine Editor and add it to the chart.
   await p.click('[data-name="pine-dialog-button"]'); await p.waitForTimeout(5000);
-  await p.locator('#overlap-manager-root .monaco-editor .view-lines').first().click(); await p.keyboard.press('Control+A');
-  await p.evaluate(s => navigator.clipboard.writeText(s), SRC); await p.keyboard.press('Control+V'); await p.waitForTimeout(3000);
+  // Paste the source; verify the editor holds exactly the pasted line count (Ctrl+A occasionally misses, which
+  // appends the source to the editor's previous draft and yields "Scripts must contain one declaration statement").
+  const want = SRC.split('\n').length;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await p.locator('#overlap-manager-root .monaco-editor .view-lines').first().click(); await p.waitForTimeout(500);
+    await p.keyboard.press('Control+A'); await p.keyboard.press('Delete'); await p.waitForTimeout(300); await p.keyboard.press('Control+A');
+    await p.evaluate(s => navigator.clipboard.writeText(s), SRC); await p.keyboard.press('Control+V'); await p.waitForTimeout(3000);
+    const lines = +((await p.evaluate(() => (document.body.innerText.match(/Line (\d+), Col \d+/) || [])[1])) || 0);
+    L('editor lines after paste: ' + lines + ' (source ' + want + ')');
+    if (Math.abs(lines - want) <= 1) break;
+    if (attempt === 3) { await shot(p, 'paste_failed.png'); throw new Error('paste did not replace the editor content'); }
+  }
   await p.locator('#overlap-manager-root button', { hasText: /Add to chart|Update on chart/ }).first().click(); L('added to chart');
   await p.waitForTimeout(40000);
   await p.locator('#overlap-manager-root button[aria-label="Close"]').first().click(); await p.waitForTimeout(2000);

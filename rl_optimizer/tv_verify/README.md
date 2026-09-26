@@ -2,7 +2,7 @@
 
 `run_tester.js` opens TradingView in headless Chromium, creates a fresh chart layout, pastes
 `trend_core_wae_professional.pine` into the Pine Editor, adds it to a daily chart, and reads the
-Strategy Tester report for SPY, QQQ, SMH and IWM. It writes `tester_results.json` and two screenshots
+Strategy Tester report for the basket (SPY, QQQ, SMH by default; `TV_SYMBOLS` for others). It writes `tester_results.json` and two screenshots
 per symbol (`tester_<SYMBOL>.png`, `tester_<SYMBOL>_list_of_trades.png`) next to the script.
 `RESULTS.md` holds the 2026-09-25 run compared with the Python replica; `CORE_ONLY.md` holds the
 same comparison for the Core-only script (`core_only_*` files).
